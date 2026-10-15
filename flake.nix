@@ -15,11 +15,18 @@
         default = package;
         codex-desktop-providers = package;
       };
-      checks.${system}.package = package;
+      checks.${system} = {
+        inherit package;
+      }
+      // nixpkgs.lib.optionalAttrs (!(builtins.pathExists ./release.json)) {
+        upstream = pkgs.callPackage ./nix/check-upstream.nix { inherit package; };
+      };
       devShells.${system}.default = pkgs.mkShell {
         packages = [
           pkgs.nodejs_24
           pkgs.nixfmt
+          pkgs.gnutar
+          pkgs.gzip
         ];
       };
     };

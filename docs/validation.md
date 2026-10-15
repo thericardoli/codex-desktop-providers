@@ -98,3 +98,16 @@ invalid, duplicate or missing lists, defaults outside the list, and repeated mod
 profiles. A separate native-loader probe confirmed that assigning a list to the
 singular enum key fails configuration loading; using the plural extension keeps
 the native configuration valid.
+
+## Release distribution (0.5.0)
+
+CI runs the source package checks and disposable upstream archive validation.
+The portable release is built from Nix's installed production package and tested
+again using the release's Nix installer, without TypeScript compilation or npm
+installation. The release records its source revision and exact supported
+Desktop version. Local consumer validation covers the downloaded archive input,
+Desktop packaging, the NixOS closure, and Home Manager activation package.
+
+The pipeline does not launch the graphical app or make authenticated model
+requests. Existing real-backend smoke evidence above remains separate from the
+release packaging checks.

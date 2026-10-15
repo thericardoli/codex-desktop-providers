@@ -144,23 +144,73 @@ An existing identical patch is verified and left untouched. A different patch,
 unsupported app version, mismatched asset hash, or ambiguous structural match
 fails before writing. Rebuild from the clean upstream package to update the patch.
 
-## Nix
+## Nix: download a release
+
+GitHub Actions checks every push and pull request. Pushing a version tag such as
+`v0.5.0` publishes a compiled, portable tool with its production dependencies,
+Nix installer, release provenance, and a separate `SHA256SUMS` file. No Desktop
+archive or credentials are distributed. No Cachix account or signing key is
+needed for this release-download approach.
+
+Use the release archive directly as a **non-flake input**:
+
+```nix
+inputs.codex-desktop-providers = {
+  url = "https://github.com/thericardoli/codex-desktop-providers/releases/download/v0.5.0/codex-desktop-providers.tar.gz";
+  flake = false;
+};
+```
+
+In your package overlay:
+
+```nix
+codex-desktop-providers = final.callPackage "${inputs.codex-desktop-providers}/nix/package.nix" {
+  source = inputs.codex-desktop-providers;
+};
+```
+
+The release installer copies the compiled files and creates a wrapper using
+Nix's Node.js. It does not install npm dependencies or compile TypeScript.
+`flake.lock` pins the unpacked archive's NAR hash; modifying the remote asset
+cannot silently change an already locked deployment. GitHub's automatically
+created source tarball is different: it builds the project from source.
+
+The tool exposes `passthru.desktop` as the authoritative supported Desktop
+version, download URL, and hash. A consuming desktop derivation can use:
+
+```nix
+let
+  desktop = codex-desktop-providers.desktop;
+in
+stdenvNoCC.mkDerivation {
+  pname = "chatgpt";
+  inherit (desktop) version;
+  src = fetchurl { inherit (desktop) url hash; };
+  nativeBuildInputs = [ codex-desktop-providers ];
+  postPatch = ''
+    ${lib.getExe codex-desktop-providers} patch \
+      --asar usr/lib/chatgpt/resources/app.asar
+  '';
+  # Keep the rest of your existing Desktop packaging here.
+}
+```
+
+The local consumer in `/home/ricardo/nixos-config` uses this arrangement. Updating
+the release input and lock updates the patch and supported Desktop together.
+Never use a floating `latest` download URL. See [maintenance](docs/maintenance.md)
+for release and upgrade commands.
+
+For development, the Git checkout remains buildable from source:
 
 ```sh
 nix build .#codex-desktop-providers
 nix flake check
 ```
 
-`nix/package.nix` is also usable with `callPackage`, passing an explicit `source`
-when consumed as a non-flake input. The tool runs its test suite during the build.
-
-The NixOS configuration in `/home/ricardo/nixos-config` consumes this project via
-a local Git flake input and applies the patch during the ChatGPT package's
-`postPatch` phase. The lock pins a source commit, excluding generated files and
-development dependencies. Source is copied into the Nix store: it is a build
-dependency, not a runtime dependency on this checkout. When changing this project,
-commit the reviewed change and refresh that input's lock. Runtime dependencies remain
-the desktop's own native provider/auth support.
+Source checks include version consistency, type checking, unit tests, formatting,
+and a disposable upstream archive test. Release downloads only need the light
+installation step. Node.js itself comes from the consumer's nixpkgs; matching the
+CI nixpkgs revision is unnecessary for this portable JavaScript archive.
 
 Building does not activate the configuration or restart a running desktop.
 After activation, completely quit and reopen the app to load the patched assets.

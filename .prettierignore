@@ -3,3 +3,6 @@ dist
 .test-dist
 package-lock.json
 flake.lock
+release/
+release-test/
+release-result

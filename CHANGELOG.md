@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0
+
+- Build and test with GitHub Actions; publish portable patch-tool archives and
+  checksums on matching version tags.
+- Install compiled release archives directly with Nix, without a binary cache,
+  local TypeScript compilation, or npm dependency installation.
+- Expose one shared Desktop version/download/adapter manifest to the patch and
+  Nix consumer; check package and patch version consistency in CI.
+- Validate the real upstream archive in a disposable Nix build before release.
+
 ## Unreleased
 
 - Correct the GLM-5.3-Flash preset to low/high/max, retaining high as the configured

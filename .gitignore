@@ -5,3 +5,6 @@ result
 *.asar
 *.asar.unpacked/
 .direnv/
+release/
+release-test/
+release-result

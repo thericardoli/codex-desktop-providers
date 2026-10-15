@@ -9,7 +9,8 @@ The adapter modifies these two assets:
 - `webview/assets/app-shared-6fc3d63f0486.js`: request, prewarm, default selection
 - `webview/assets/app-initial-17317d71fd80.js`: visibility of registered models
 
-The actual SHA-256 values live in `src/patch/adapters.ts`. Both version and hashes
+The Desktop download pin and asset SHA-256 values live in
+`src/patch/compatibility.json`, imported by the adapter and exposed by Nix. Both version and hashes
 must match, followed by exactly one structural match for every patch point.
 Version strings alone are insufficient because release variants can contain
 different JavaScript assets.
