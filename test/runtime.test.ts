@@ -1,0 +1,318 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { intercept, prewarm, writeDefault } from "../src/runtime/index.js";
+import {
+  appendModels,
+  isRegisteredModel,
+  readProfiles,
+} from "../src/runtime/registry.js";
+import {
+  object,
+  type JsonObject,
+  type RequestClient,
+} from "../src/runtime/types.js";
+
+const MODEL = "z-ai/glm-5.3-flash";
+const config = () => ({
+  model: "native-gpt",
+  model_providers: {
+    openrouter: {
+      name: "OpenRouter",
+      wire_api: "responses",
+      auth: { command: "DO_NOT_SERIALIZE_THIS_CREDENTIAL_HELPER" },
+    },
+  },
+  profiles: {
+    glm: {
+      model: MODEL,
+      model_provider: "openrouter",
+      model_reasoning_effort: "high",
+      model_context_window: 1048576,
+      approval_policy: "never",
+      developer_instructions: "must not be copied",
+    },
+  },
+});
+
+function fixture(hostId = "local") {
+  const calls: {
+    method: string;
+    params: JsonObject | null | undefined;
+    options: JsonObject | undefined;
+  }[] = [];
+  const threads = new Map<string, string>();
+  const nativeModel = {
+    id: "native-gpt",
+    model: "native-gpt",
+    hidden: false,
+    isDefault: true,
+    availableAccessPrograms: { cyber: ["special"] },
+  };
+  const client: RequestClient = {
+    hostId,
+    sendRequest(method, params, options) {
+      return intercept(
+        client,
+        method,
+        params,
+        options,
+        async (method, params, options) => {
+          calls.push({ method, params, options });
+          if (method === "config/read") return { config: config() };
+          if (method === "model/list")
+            return { data: [nativeModel], nextCursor: null };
+          if (method === "thread/start") {
+            const id = `thread-${threads.size}`;
+            const provider = String(params?.modelProvider ?? "openai");
+            threads.set(id, provider);
+            return {
+              thread: { id, modelProvider: provider },
+              model: params?.model,
+            };
+          }
+          if (
+            method === "thread/read" ||
+            method === "thread/resume" ||
+            method === "thread/fork"
+          )
+            return {
+              thread: {
+                id: params?.threadId,
+                modelProvider: threads.get(String(params?.threadId)),
+              },
+            };
+          return { ok: true };
+        },
+      );
+    },
+  };
+  return { client, calls, threads, nativeModel };
+}
+
+test("register native profiles without copying provider auth or security settings", () => {
+  const entries = readProfiles(config());
+  const entry = entries.get(MODEL)!;
+  assert.equal(entry.provider, "openrouter");
+  assert.deepEqual(entry.config, {
+    model_context_window: 1048576,
+    model_reasoning_effort: "high",
+  });
+  assert.equal(
+    JSON.stringify([...entries]).includes("DO_NOT_SERIALIZE"),
+    false,
+  );
+  assert.equal(
+    JSON.stringify([...entries]).includes("developer_instructions"),
+    false,
+  );
+});
+
+test("ignore official and non-model profiles", () => {
+  assert.equal(
+    readProfiles({
+      profiles: {
+        official: { model: "gpt", model_provider: "openai" },
+        security: { approval_policy: "never" },
+      },
+    }).size,
+    0,
+  );
+});
+
+test("reject undefined, incompatible, duplicate and invalid-effort registrations", () => {
+  assert.throws(
+    () => readProfiles({ profiles: config().profiles }),
+    /undefined provider/,
+  );
+  assert.throws(
+    () =>
+      readProfiles({
+        ...config(),
+        model_providers: { openrouter: { wire_api: "chat" } },
+      }),
+    /does not translate/,
+  );
+  assert.throws(
+    () =>
+      readProfiles({
+        ...config(),
+        profiles: { ...config().profiles, duplicate: config().profiles.glm },
+      }),
+    /multiple profiles/,
+  );
+  assert.throws(
+    () =>
+      readProfiles({
+        ...config(),
+        profiles: {
+          glm: { ...config().profiles.glm, model_reasoning_effort: "invented" },
+        },
+      }),
+    /Invalid reasoning effort/,
+  );
+});
+
+test("append model metadata without changing native entries or entitlement flags", async () => {
+  const { client, nativeModel } = fixture();
+  const response = object(await client.sendRequest("model/list", {}))!;
+  const data = response.data as JsonObject[];
+  assert.equal(data[0], nativeModel);
+  assert.equal(data.length, 2);
+  assert.equal(data[1]?.model, MODEL);
+  assert.equal(data[1]?.displayName, `${MODEL} (OpenRouter)`);
+  assert.equal(isRegisteredModel(data[1]), true);
+  assert.equal(isRegisteredModel(nativeModel), false);
+});
+
+test("respect native pagination and reject collisions with the native catalog", () => {
+  const entries = readProfiles(config());
+  const first = { data: [], nextCursor: "page2" };
+  assert.equal(appendModels(first, entries), first);
+  assert.throws(
+    () => appendModels({ data: [{ model: MODEL }], nextCursor: null }, entries),
+    /ambiguous provider/,
+  );
+  assert.throws(
+    () =>
+      appendModels({ data: [{ model: MODEL }], nextCursor: "page2" }, entries),
+    /ambiguous provider/,
+  );
+});
+
+test("route new custom chats directly with only whitelisted model tuning", async () => {
+  const { client, calls } = fixture();
+  await client.sendRequest("thread/start", {
+    model: MODEL,
+    modelProvider: null,
+    config: { "features.example": false },
+    cwd: "/project",
+  });
+  const sent = calls.find((call) => call.method === "thread/start")!.params!;
+  assert.equal(sent.model, MODEL);
+  assert.equal(sent.modelProvider, "openrouter");
+  assert.equal(sent.cwd, "/project");
+  assert.deepEqual(sent.config, {
+    model_context_window: 1048576,
+    model_reasoning_effort: "high",
+    "features.example": false,
+  });
+});
+
+test("leave official starts and explicit unrelated runtimes untouched", async () => {
+  const { client, calls } = fixture();
+  const original = { model: "native-gpt", modelProvider: null };
+  await client.sendRequest("thread/start", original);
+  assert.equal(calls.at(-1)?.params, original);
+  await assert.rejects(
+    client.sendRequest("thread/start", {
+      model: MODEL,
+      modelProvider: "another",
+    }),
+    /Conflicting provider/,
+  );
+});
+
+test("apply routing to the native prewarm path", async () => {
+  const { client } = fixture();
+  let sent: JsonObject | undefined;
+  await prewarm(client, { model: MODEL }, async (params) => {
+    sent = params;
+    return { thread: { id: "prewarmed", modelProvider: "openrouter" } };
+  });
+  assert.equal(sent?.modelProvider, "openrouter");
+});
+
+test("pin provider for follow-up turns and reject switching in either direction", async () => {
+  const { client, calls } = fixture();
+  await client.sendRequest("thread/start", { model: MODEL });
+  await client.sendRequest("turn/start", {
+    threadId: "thread-0",
+    collaborationMode: {
+      mode: "default",
+      settings: { model: MODEL, reasoning_effort: "ultra" },
+    },
+  });
+  const sent = calls.at(-1)?.params!;
+  assert.equal(
+    object(object(sent.collaborationMode)?.settings)?.reasoning_effort,
+    "high",
+  );
+  await assert.rejects(
+    client.sendRequest("turn/start", {
+      threadId: "thread-0",
+      model: "native-gpt",
+    }),
+    /Start a new chat/,
+  );
+  await client.sendRequest("thread/start", { model: "native-gpt" });
+  await assert.rejects(
+    client.sendRequest("turn/start", { threadId: "thread-1", model: MODEL }),
+    /Start a new chat/,
+  );
+});
+
+test("verify persisted provider before resuming a custom model", async () => {
+  const { client, threads, calls } = fixture();
+  threads.set("old", "openrouter");
+  await client.sendRequest("thread/resume", { threadId: "old", model: MODEL });
+  assert.deepEqual(calls.at(-1)?.params?.config, {
+    model_context_window: 1048576,
+    model_reasoning_effort: "high",
+  });
+  assert.equal(calls.at(-1)?.params?.effort, undefined);
+  threads.set("official", "openai");
+  await assert.rejects(
+    client.sendRequest("thread/resume", { threadId: "official", model: MODEL }),
+    /Start a new chat/,
+  );
+  await assert.rejects(
+    client.sendRequest("thread/resume", { threadId: "missing", model: MODEL }),
+    /Could not verify/,
+  );
+});
+
+test("do not perform extra thread reads for ordinary native turns", async () => {
+  const { client, calls } = fixture();
+  await client.sendRequest("turn/start", {
+    threadId: "unknown-native",
+    model: "native-gpt",
+  });
+  assert.equal(
+    calls.some((call) => call.method === "thread/read"),
+    false,
+  );
+});
+
+test("unify only unspecified thread list filters", async () => {
+  const { client, calls } = fixture();
+  await client.sendRequest("thread/list", { modelProviders: null });
+  assert.deepEqual(calls.at(-1)?.params?.modelProviders, []);
+  const explicit = { modelProviders: ["openai"] };
+  await client.sendRequest("thread/list", explicit);
+  assert.equal(calls.at(-1)?.params, explicit);
+});
+
+test("custom default selection does not write global model/provider or credentials", async () => {
+  const { client } = fixture();
+  let writes = 0;
+  const write = async () => {
+    writes++;
+    return { status: "ok" };
+  };
+  assert.deepEqual(await writeDefault(client, MODEL, write), {
+    status: "okOverridden",
+  });
+  assert.equal(writes, 0);
+  await writeDefault(client, "native-gpt", write);
+  assert.equal(writes, 1);
+});
+
+test("leave remote and cloud requests outside the patch", async () => {
+  const { client, calls } = fixture("remote-host");
+  await client.sendRequest("thread/start", { model: MODEL });
+  assert.deepEqual(
+    calls.map((call) => call.method),
+    ["thread/start"],
+  );
+  assert.equal(calls[0]?.params?.modelProvider, undefined);
+});

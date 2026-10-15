@@ -1,0 +1,32 @@
+{
+  "name": "codex-desktop-providers",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Version-checked direct-provider model support for Codex Desktop",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "codex-desktop-providers": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc -p tsconfig.test.json && node --test .test-dist/test/*.test.js",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@electron/asar": "4.3.1",
+    "acorn": "8.19.0",
+    "acorn-walk": "8.3.4",
+    "magic-string": "1.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "prettier": "3.9.10",
+    "typescript": "7.0.2"
+  }
+}

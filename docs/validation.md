@@ -1,0 +1,68 @@
+# Validation
+
+Initial verification date: **2026-10-15**.
+
+## Automated checks
+
+```sh
+npm ci --ignore-scripts
+npm run typecheck
+npm test
+npm run build
+npm run format:check
+nix flake check
+```
+
+The suite covers profile validation, keeping credentials/security fields out of
+routing metadata, native model preservation, pagination, duplicate IDs, direct
+provider parameters, prewarming, follow-up/resume provider checks, remote-host
+exclusion, global-default preservation, exact adapter matching, and ASAR metadata
+and integrity preservation.
+
+## Actual application assets
+
+Work with a disposable archive, retaining the original application untouched:
+
+```sh
+cp --reflink=auto /path/to/original/app.asar /tmp/provider-smoke.asar
+chmod u+w /tmp/provider-smoke.asar
+node dist/cli.js check --asar /tmp/provider-smoke.asar
+node dist/cli.js patch --asar /tmp/provider-smoke.asar
+node dist/cli.js check --asar /tmp/provider-smoke.asar
+node scripts/verify-upstream.mjs --asar /tmp/provider-smoke.asar
+```
+
+`verify-upstream.mjs` executes the actual patched upstream method bodies against
+a test transport. It verifies model listing/filtering, retention of native access
+checks, new-chat routing, prewarming, and default-model selection. This passed for
+desktop 26.1007.71326. No proprietary application fixture is committed.
+
+## Native backend and direct transport
+
+```sh
+node scripts/verify-app-server.mjs --codex /path/to/desktop/resources/codex
+```
+
+This uses an isolated temporary `CODEX_HOME` and a localhost test upstream. It
+starts the real native app-server and verifies profile registration, provider
+selection, authenticated direct Responses requests, accepted tool declarations,
+and streamed completion. It also confirms that the global provider remains
+OpenAI. The test does not use account credentials or external inference. It
+passed using the backend bundled with the supported desktop release.
+
+## Live provider verification
+
+A separate isolated ephemeral native-backend check successfully completed a
+text inference with **OpenRouter `z-ai/glm-5.3-flash`** on 2026-10-15, using the
+existing provider's native authentication helper. No credentials, returned
+prompts, or account data were copied into this repository. The live check also
+submitted the backend's native tool declarations; it did not ask the model to
+execute tools.
+
+## Remaining manual verification
+
+The running desktop was not replaced or restarted during implementation. After
+activating the Nix build, verify the visible menu, separate official/custom chats,
+and restart/resume behavior in the actual Electron UI. Executing the patched
+method bodies and backend tests is evidence about those boundaries, not a claim
+that an interactive Electron session has already been checked.

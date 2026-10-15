@@ -1,0 +1,9 @@
+# Merge into ~/.codex/config.toml, alongside your existing provider table.
+# Keep the global model_provider unset (or "openai") to preserve native login.
+# This profile references [model_providers.openrouter]; it contains no API key.
+
+[profiles.openrouter-glm-5-3-flash]
+model = "z-ai/glm-5.3-flash"
+model_provider = "openrouter"
+model_reasoning_effort = "high"
+model_context_window = 1048576
