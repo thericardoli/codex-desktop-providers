@@ -144,36 +144,28 @@ An existing identical patch is verified and left untouched. A different patch,
 unsupported app version, mismatched asset hash, or ambiguous structural match
 fails before writing. Rebuild from the clean upstream package to update the patch.
 
-## Nix: download a release
+## Nix: build from the GitHub flake
 
-GitHub Actions checks every push and pull request. Pushing a version tag such as
-`v0.5.0` publishes a compiled, portable tool with its production dependencies,
-Nix installer, release provenance, and a separate `SHA256SUMS` file. No Desktop
-archive or credentials are distributed. No Cachix account or signing key is
-needed for this release-download approach.
-
-Use the release archive directly as a **non-flake input**:
+Use the repository directly, sharing your existing nixpkgs input:
 
 ```nix
 inputs.codex-desktop-providers = {
-  url = "https://github.com/thericardoli/codex-desktop-providers/releases/download/v0.5.0/codex-desktop-providers.tar.gz";
-  flake = false;
+  url = "github:thericardoli/codex-desktop-providers";
+  inputs.nixpkgs.follows = "nixpkgs";
 };
 ```
 
 In your package overlay:
 
 ```nix
-codex-desktop-providers = final.callPackage "${inputs.codex-desktop-providers}/nix/package.nix" {
-  source = inputs.codex-desktop-providers;
-};
+codex-desktop-providers = inputs.codex-desktop-providers.packages.${system}.default;
 ```
 
-The release installer copies the compiled files and creates a wrapper using
-Nix's Node.js. It does not install npm dependencies or compile TypeScript.
-`flake.lock` pins the unpacked archive's NAR hash; modifying the remote asset
-cannot silently change an already locked deployment. GitHub's automatically
-created source tarball is different: it builds the project from source.
+`flake.lock` pins a specific Git commit and source NAR hash. The URL may track the
+repository's default branch, but normal builds keep using the locked revision.
+The tool builds from source locally and runs version, type, unit-test, and format
+checks. No release asset is required. This is the arrangement used by the local
+consumer in `/home/ricardo/nixos-config`.
 
 The tool exposes `passthru.desktop` as the authoritative supported Desktop
 version, download URL, and hash. A consuming desktop derivation can use:
@@ -195,10 +187,8 @@ stdenvNoCC.mkDerivation {
 }
 ```
 
-The local consumer in `/home/ricardo/nixos-config` uses this arrangement. Updating
-the release input and lock updates the patch and supported Desktop together.
-Never use a floating `latest` download URL. See [maintenance](docs/maintenance.md)
-for release and upgrade commands.
+Updating the source input's lock updates the patch and supported Desktop together.
+See [maintenance](docs/maintenance.md) for upgrade and release commands.
 
 For development, the Git checkout remains buildable from source:
 
@@ -207,10 +197,39 @@ nix build .#codex-desktop-providers
 nix flake check
 ```
 
-Source checks include version consistency, type checking, unit tests, formatting,
-and a disposable upstream archive test. Release downloads only need the light
-installation step. Node.js itself comes from the consumer's nixpkgs; matching the
-CI nixpkgs revision is unnecessary for this portable JavaScript archive.
+Standalone flake checks also download the pinned original Desktop and validate
+its patch on a disposable archive. CI runs these checks on every push and pull
+request, and builds and smoke-tests a portable patch archive.
+
+### Optional prebuilt releases
+
+Pushing a matching version tag such as `v0.5.0` also publishes a compiled portable
+tool, production dependencies, a Nix installer, provenance, and SHA256SUMS to
+GitHub Releases. Desktop archives and credentials are never distributed. This is
+an optional distribution channel; the GitHub flake above continues to build from
+source locally.
+
+To explicitly choose a prebuilt download instead, use a non-flake input:
+
+```nix
+inputs.codex-desktop-providers = {
+  url = "https://github.com/thericardoli/codex-desktop-providers/releases/download/v0.5.0/codex-desktop-providers.tar.gz";
+  flake = false;
+};
+```
+
+For this alternative, use `callPackage` instead of the flake's package output:
+
+```nix
+codex-desktop-providers = final.callPackage "${inputs.codex-desktop-providers}/nix/package.nix" {
+  source = inputs.codex-desktop-providers;
+};
+```
+
+The release installer copies compiled files and wraps them using Nix's Node.js,
+without npm installation or TypeScript compilation. `flake.lock` pins the entire
+unpacked archive's NAR hash. A floating `latest` download URL is unnecessary.
+No Cachix account or signing key is needed for either mode.
 
 Building does not activate the configuration or restart a running desktop.
 After activation, completely quit and reopen the app to load the patched assets.

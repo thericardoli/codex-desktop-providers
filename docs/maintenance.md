@@ -57,14 +57,19 @@ Release asset is the deployment input.
 
 ## Local NixOS consumer
 
-The consumer uses a specific GitHub Release archive as a non-flake source input.
-Its NAR hash is pinned in `flake.lock`. The included Nix installer recognizes
-`release.json`, validates metadata, copies compiled files, and wraps them with
-Nix's Node.js. `codex-desktop-providers.desktop` supplies the compatible Desktop
-version and download hash to the existing local Desktop derivation.
+The consumer uses `github:thericardoli/codex-desktop-providers` as a flake input,
+with `inputs.nixpkgs.follows = "nixpkgs"`. Its overlay takes the exported default
+package. The tool builds from source using the consumer's nixpkgs and performs
+its source checks locally. This does not depend on tags, releases, CI artifacts,
+or prebuilt binaries.
 
-To upgrade, change the release tag in the input URL,
-then refresh only that input and review the lock diff:
+`flake.lock` pins the exact source commit and NAR hash. The package exposes
+`codex-desktop-providers.desktop`, which supplies the compatible Desktop version,
+URL, and download hash to the existing local Desktop derivation. A source update
+therefore updates both halves of the supported combination; a Desktop version
+without a reviewed adapter is never selected implicitly.
+
+To upgrade to the current reviewed main branch:
 
 ```sh
 cd /home/ricardo/nixos-config
@@ -72,10 +77,14 @@ nix flake update codex-desktop-providers
 nix build 'path:.#chatgpt' --no-link
 ```
 
-No floating `latest` lookup happens during evaluation or builds. A stale or
-modified asset fails the locked hash check. Desktop asset hashes and structural
-checks still run during local packaging. The built-in provenance file identifies
-the source commit used by CI; SHA256SUMS supports manual downloads.
+Review the locked revision and build result before applying the configuration.
+Normal builds do not move the lock. Roll back the input lock to restore the
+previous patch/Desktop combination. For local development, use
+`--override-input codex-desktop-providers path:/home/ricardo/projects/codex-desktop-providers`
+without changing the normal GitHub input.
+
+The optional release archive is a separate distribution mode described in the
+README. It is not part of this consumer's build or upgrade path.
 
 For overlay/flake changes, also run the consumer repository's flake check,
 NixOS closure build and Home Manager activation-package build. Activation is a

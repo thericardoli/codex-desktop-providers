@@ -105,8 +105,9 @@ CI runs the source package checks and disposable upstream archive validation.
 The portable release is built from Nix's installed production package and tested
 again using the release's Nix installer, without TypeScript compilation or npm
 installation. The release records its source revision and exact supported
-Desktop version. Local consumer validation covers the downloaded archive input,
-Desktop packaging, the NixOS closure, and Home Manager activation package.
+Desktop version. Local consumer validation covers the GitHub source flake input,
+Desktop packaging, the NixOS closure, and Home Manager activation package. The
+consumer builds from source and does not depend on a GitHub Release asset.
 
 The pipeline does not launch the graphical app or make authenticated model
 requests. Existing real-backend smoke evidence above remains separate from the
