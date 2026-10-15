@@ -1,17 +1,17 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  ADAPTERS,
   MANIFEST_PATH,
   PATCH_VERSION,
   RUNTIME_DIRECTORY,
   RUNTIME_ASSETS,
-} from "./adapters.js";
+} from "./constants.js";
 import { hasEntry, readText, rewriteArchive, sha256 } from "./archive.js";
-import { transformPicker, transformShared } from "./transforms.js";
+import { discoverChanges, isRendererAsset } from "./discovery.js";
+import { PATCH_POINTS } from "./transforms.js";
 
 interface Manifest {
-  schemaVersion: 1;
+  schemaVersion: 2;
   patchVersion: string;
   appVersion: string;
   inputs: Record<string, string>;
@@ -24,20 +24,56 @@ export interface PatchPlan {
   changes: Map<string, Buffer>;
 }
 
+/** Validate our installed patch, without comparing against an upstream allowlist. */
+function verifyManifest(
+  value: unknown,
+  runtimeAssets: ReadonlyMap<string, Buffer>,
+): Manifest {
+  const manifest = value as Partial<Manifest> | null;
+  const validHashes = (hashes: unknown): hashes is Record<string, string> =>
+    hashes != null &&
+    typeof hashes === "object" &&
+    !Array.isArray(hashes) &&
+    Object.values(hashes).every(
+      (hash) => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash),
+    );
+  if (
+    !manifest ||
+    manifest.schemaVersion !== 2 ||
+    manifest.patchVersion !== PATCH_VERSION ||
+    typeof manifest.appVersion !== "string" ||
+    !validHashes(manifest.inputs) ||
+    !validHashes(manifest.outputs)
+  )
+    throw new Error(
+      "Archive contains a different or invalid patch; rebuild from the clean upstream package",
+    );
+  const sourcePaths = Object.keys(manifest.inputs);
+  const expectedPaths = [...sourcePaths, ...runtimeAssets.keys()].sort();
+  if (
+    !sourcePaths.length ||
+    sourcePaths.length > PATCH_POINTS.length ||
+    !sourcePaths.every(isRendererAsset) ||
+    Object.keys(manifest.outputs).sort().join("\n") !==
+      expectedPaths.join("\n") ||
+    [...runtimeAssets].some(
+      ([path, data]) => manifest.outputs![path] !== sha256(data),
+    )
+  )
+    throw new Error(
+      "Archive contains inconsistent patch assets; rebuild from the clean upstream package",
+    );
+  return manifest as Manifest;
+}
+
 export async function planPatch(
   archive: string,
   runtimeDirectory: string,
 ): Promise<PatchPlan> {
-  const pkg = JSON.parse(readText(archive, "package.json")) as {
-    version: string;
-  };
-  const adapter = ADAPTERS.find(
-    (candidate) => candidate.version === pkg.version,
-  );
-  if (!adapter)
-    throw new Error(
-      `Unsupported desktop version: ${pkg.version}. Add and review a version adapter first`,
-    );
+  const pkg: { version?: unknown } = hasEntry(archive, "package.json")
+    ? JSON.parse(readText(archive, "package.json"))
+    : {};
+  const appVersion = typeof pkg.version === "string" ? pkg.version : "unknown";
   const runtimeAssets = new Map<string, Buffer>();
   for (const name of RUNTIME_ASSETS)
     runtimeAssets.set(
@@ -45,31 +81,10 @@ export async function planPatch(
       await readFile(join(runtimeDirectory, name)),
     );
   if (hasEntry(archive, MANIFEST_PATH)) {
-    const manifest = JSON.parse(readText(archive, MANIFEST_PATH)) as Manifest;
-    const expectedPaths = [
-      adapter.shared.path,
-      adapter.picker.path,
-      ...runtimeAssets.keys(),
-    ].sort();
-    if (
-      !manifest ||
-      manifest.schemaVersion !== 1 ||
-      manifest.patchVersion !== PATCH_VERSION ||
-      manifest.appVersion !== pkg.version ||
-      !manifest.outputs ||
-      !manifest.inputs ||
-      Object.keys(manifest.outputs).sort().join("\n") !==
-        expectedPaths.join("\n") ||
-      manifest.inputs[adapter.shared.path] !== adapter.shared.sha256 ||
-      manifest.inputs[adapter.picker.path] !== adapter.picker.sha256 ||
-      [...runtimeAssets].some(
-        ([path, data]) => manifest.outputs[path] !== sha256(data),
-      )
-    ) {
-      throw new Error(
-        "Archive contains a different patch; rebuild from the clean upstream package",
-      );
-    }
+    const manifest = verifyManifest(
+      JSON.parse(readText(archive, MANIFEST_PATH)),
+      runtimeAssets,
+    );
     for (const [path, hash] of Object.entries(manifest.outputs)) {
       if (sha256(readText(archive, path)) !== hash)
         throw new Error(`Patched asset failed integrity verification: ${path}`);
@@ -78,18 +93,9 @@ export async function planPatch(
   }
   const inputs: Record<string, string> = {};
   const changes = new Map<string, Buffer>();
-  for (const [asset, transform] of [
-    [adapter.shared, transformShared],
-    [adapter.picker, transformPicker],
-  ] as const) {
-    const source = readText(archive, asset.path);
-    const hash = sha256(source);
-    if (hash !== asset.sha256)
-      throw new Error(
-        `Upstream asset fingerprint mismatch: ${asset.path}. Expected ${asset.sha256}, got ${hash}`,
-      );
-    inputs[asset.path] = hash;
-    changes.set(asset.path, Buffer.from(transform(source)));
+  for (const [path, { source, output }] of discoverChanges(archive)) {
+    inputs[path] = sha256(source);
+    changes.set(path, Buffer.from(output));
   }
   for (const [path, data] of runtimeAssets) {
     if (hasEntry(archive, path))
@@ -99,9 +105,9 @@ export async function planPatch(
     changes.set(path, data);
   }
   const manifest: Manifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     patchVersion: PATCH_VERSION,
-    appVersion: pkg.version,
+    appVersion,
     inputs,
     outputs: Object.fromEntries(
       [...changes].map(([path, data]) => [path, sha256(data)]),

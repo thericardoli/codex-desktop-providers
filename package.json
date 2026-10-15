@@ -1,13 +1,13 @@
 {
   "name": "codex-desktop-providers",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "files": [
     "dist",
     "README.md",
     "LICENSE"
   ],
-  "description": "Version-checked direct-provider model support for Codex Desktop",
+  "description": "Structure-based direct-provider model support for Codex Desktop",
   "type": "module",
   "license": "MIT",
   "engines": {

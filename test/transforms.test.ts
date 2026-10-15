@@ -2,24 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { transformPicker, transformShared } from "../src/patch/transforms.js";
 
-// Small synthetic fixtures, not redistributed proprietary application code.
-const shared = `export class Client {
-  async sendRequest(method, params, options) {
-    if (this.dispatchMessage == null) throw Error("AppServerRequestClient is missing a message dispatcher");
-    return this.enqueueRequest(method, params, options);
-  }
-  async prewarmThreadStart(params, options) { this.dispatchMessage("warm"); return this.enqueueRequest("thread/start", params, options); }
-}
-export class Manager { setDefaultModelConfig(model, effort, profile) { return this.defaultTurnConfig.writeModel(model, effort, profile); } }
-`;
-
-const picker = `export function visible({ model: selected, availableModels, useHiddenModels, hasConfiguredModelCatalog, apiKeyDaybreakSupported }) {
-  let programs = selected.availableAccessPrograms?.cyber;
-  return availableModels.has(selected.model) && !selected.hidden && !programs;
-}
-export function select({ models: catalog, enabledReasoningEfforts, defaultModel }) {
-  return { models: catalog.map(model => ({...model, supportedReasoningEfforts: model.supportedReasoningEfforts.filter(e => enabledReasoningEfforts.has(e.reasoningEffort))})), defaultModel: null };
-}`;
+import { shared, picker } from "./fixtures.js";
 
 test("wrap structurally matched request, prewarm, and default paths", () => {
   const result = transformShared(shared);

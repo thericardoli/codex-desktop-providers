@@ -1,19 +1,33 @@
 # Compatibility
 
-| Desktop version | Platform     | Status                                  |
-| --------------- | ------------ | --------------------------------------- |
-| 26.1007.71326   | Linux x86_64 | Explicit adapter and asset fingerprints |
+The patch attempts **every Desktop version by default**. There is no app-version
+allowlist, hardcoded renderer filename, or predefined upstream asset hash check.
+The app's version is recorded in the patch manifest for diagnostics only.
 
-The adapter modifies these two assets:
+It enumerates packed JavaScript modules under `webview/`, uses inexpensive code
+markers to identify candidates, then locates five patch points with Acorn. Each
+point must occur exactly once across the entire candidate set. The points may
+move between files, combine into one module, or split across modules. Injected
+runtime imports are relative to each discovered module's directory.
 
-- `webview/assets/app-shared-6fc3d63f0486.js`: request, prewarm, default selection
-- `webview/assets/app-initial-17317d71fd80.js`: visibility of registered models
+Matching code structure is the compatibility criterion. Missing, ambiguous,
+malformed, or overlapping targets fail before the archive is modified. Changes
+to the native request contracts may still require runtime updates; unrestricted
+version eligibility is not evidence that untested code layouts or native APIs
+work. No check is bypassed by pretending an unknown version is a tested version.
 
-The Desktop download pin and asset SHA-256 values live in
-`src/patch/compatibility.json`, imported by the adapter and exposed by Nix. Both version and hashes
-must match, followed by exactly one structural match for every patch point.
-Version strings alone are insufficient because release variants can contain
-different JavaScript assets.
+| Desktop version | Platform     | Evidence                                 |
+| --------------- | ------------ | ---------------------------------------- |
+| 26.1007.71326   | Linux x86_64 | Actual structural patch and method tests |
+
+`nix/upstream.json` pins the official download used by CI. It is an integration
+test fixture, not runtime compatibility data. Consumers independently select
+their Desktop version and pin its download hash as usual for Nix packaging.
+
+Original asset hashes are measured during planning and stored in the manifest.
+Installed output hashes and runtime bytes are checked on a repeated invocation
+to detect damage or a different patch. These integrity checks do not restrict
+which clean upstream versions can be patched.
 
 The current configuration's default provider must remain OpenAI. Third-party
 models are added to the native model response only in the renderer, preserving

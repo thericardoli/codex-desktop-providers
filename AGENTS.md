@@ -9,8 +9,10 @@ This is an independent TypeScript patch project, not a model gateway.
   thread between providers or rewrite thread databases/history.
 - Keep runtime logic in `src/runtime`, archive/adapter work in `src/patch`,
   and Nix packaging in `nix/package.nix`.
-- Compatibility requires both an exact app version and reviewed source hashes.
-  Unknown or ambiguous upstream shapes must fail before modifying the archive.
+- Attempt every Desktop version without a version or asset-hash allowlist.
+  Discover patch points structurally across renderer assets. Missing, ambiguous,
+  or overlapping matches must fail before modifying the archive.
+- CI validates and builds source only; do not publish releases or prebuilt bundles.
 - Preserve unrelated ASAR payloads, native modules, links, executable bits, and
   unpacked metadata. Archive changes must be atomic and checked by an independent
   ASAR reader.

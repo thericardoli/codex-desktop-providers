@@ -13,7 +13,7 @@ async function main(): Promise<void> {
   });
   if (values.help) {
     console.log(
-      "Usage: codex-desktop-providers <check|patch> --asar /path/to/app.asar\n\ncheck validates compatibility without writing; patch atomically applies the reviewed adapter.\nBuild-time tool only: it does not start the app, change config, or access credentials.",
+      "Usage: codex-desktop-providers <check|patch> --asar /path/to/app.asar\n\ncheck discovers structural patch points without writing; patch atomically applies them to any Desktop version with matching code.\nBuild-time tool only: it does not start the app, change config, or access credentials.",
     );
     return;
   }

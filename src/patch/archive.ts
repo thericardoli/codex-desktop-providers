@@ -65,6 +65,21 @@ export function hasEntry(archive: string, path: string): boolean {
   }
 }
 
+/** Enumerate packed files without following links or reading unpacked resources. */
+export function listPackedFiles(archive: string): string[] {
+  const result: string[] = [];
+  function visit(entry: Entry, prefix: string): void {
+    if (entry.files) {
+      for (const [name, child] of Object.entries(entry.files))
+        visit(child, prefix ? `${prefix}/${name}` : name);
+    } else if (!entry.link && !entry.unpacked) {
+      result.push(prefix);
+    }
+  }
+  visit(getRawHeader(archive).header as Entry, "");
+  return result.sort();
+}
+
 /** Chromium Pickle framing used by Electron's documented ASAR format. */
 function encodeHeader(header: Entry): Buffer {
   const json = Buffer.from(JSON.stringify(header));

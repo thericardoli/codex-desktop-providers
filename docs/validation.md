@@ -16,7 +16,7 @@ nix flake check
 The suite covers profile validation, keeping credentials/security fields out of
 routing metadata, native model preservation, pagination, duplicate IDs, direct
 provider parameters, prewarming, follow-up/resume provider checks, remote-host
-exclusion, global-default preservation, exact adapter matching, and ASAR metadata
+exclusion, global-default preservation, cross-version structural discovery, and ASAR metadata
 and integrity preservation.
 
 Version 0.3 adds display-name validation, native layer precedence, disabled and
@@ -54,7 +54,7 @@ starts the real native app-server and verifies profile registration, provider
 selection, authenticated direct Responses requests, accepted tool declarations,
 and streamed completion. It also confirms that the global provider remains
 OpenAI. The test does not use account credentials or external inference. It
-passed using the backend bundled with the supported desktop release.
+passed using the backend bundled with the tested desktop fixture.
 
 Version 0.2 also verifies that the actual patched model/effort selector preserves
 all declared custom choices even when native account settings enable only high,
@@ -99,16 +99,19 @@ profiles. A separate native-loader probe confirmed that assigning a list to the
 singular enum key fails configuration loading; using the plural extension keeps
 the native configuration valid.
 
-## Release distribution (0.5.0)
+## Structural discovery and CI (0.6.0)
 
-CI runs the source package checks and disposable upstream archive validation.
-The portable release is built from Nix's installed production package and tested
-again using the release's Nix installer, without TypeScript compilation or npm
-installation. The release records its source revision and exact supported
-Desktop version. Local consumer validation covers the GitHub source flake input,
-Desktop packaging, the NixOS closure, and Home Manager activation package. The
-consumer builds from source and does not depend on a GitHub Release asset.
+The suite accepts unknown old/future version strings and absent version metadata.
+It exercises renamed/nested assets, changed source hashes, combined modules,
+split modules, idempotence, and installed-patch integrity. Missing or ambiguous
+patch points, malformed candidate syntax, invalid manifests, and occupied runtime
+paths must leave the original archive unchanged.
+
+CI runs source checks and real-archive validation against `nix/upstream.json`,
+then builds the tool. The app archive remains in the disposable build directory.
+No releases or artifacts are uploaded. The local consumer builds the GitHub
+source flake; its Desktop version is pinned independently in its own derivation.
 
 The pipeline does not launch the graphical app or make authenticated model
-requests. Existing real-backend smoke evidence above remains separate from the
-release packaging checks.
+requests. Existing real-backend smoke evidence above remains separate from
+these structural and archive checks.

@@ -4,25 +4,31 @@ import {
   type MethodDefinition,
   type FunctionDeclaration,
   type Identifier,
-  type ObjectPattern,
 } from "acorn";
 import { full } from "acorn-walk";
 import MagicString from "magic-string";
 
 const BINDING = "__codexDesktopProviders";
-const IMPORT = `import * as ${BINDING} from "./codex-desktop-providers/index.js";\n`;
+const DEFAULT_IMPORT = "./codex-desktop-providers/index.js";
+
+export const PATCH_POINTS = [
+  "request",
+  "prewarm",
+  "defaults",
+  "visibility",
+  "efforts",
+] as const;
+export type PatchPoint = (typeof PATCH_POINTS)[number];
+
+export interface PatchEdit {
+  point: PatchPoint;
+  start: number;
+  end: number;
+  replacement: string;
+}
 
 function ast(source: string) {
   return parse(source, { ecmaVersion: "latest", sourceType: "module" });
-}
-
-function single<T>(nodes: T[], description: string): T {
-  if (nodes.length !== 1) {
-    throw new Error(
-      `Expected exactly one ${description}; found ${nodes.length}`,
-    );
-  }
-  return nodes[0]!;
 }
 
 function identifiers(params: readonly Node[]): string[] {
@@ -33,159 +39,180 @@ function identifiers(params: readonly Node[]): string[] {
   });
 }
 
-function ensureUnpatched(source: string): void {
-  if (source.includes(BINDING))
-    throw new Error("Asset already contains the patch binding");
+/** Avoid parsing unrelated vendor modules. These are code markers, not filenames. */
+export function isPatchCandidate(source: string): boolean {
+  return (
+    source.includes("AppServerRequestClient is missing a message dispatcher") ||
+    (source.includes("prewarmThreadStart") &&
+      source.includes("dispatchMessage")) ||
+    (source.includes("setDefaultModelConfig") &&
+      source.includes("defaultTurnConfig")) ||
+    (source.includes("availableAccessPrograms") &&
+      source.includes("availableModels")) ||
+    (source.includes("supportedReasoningEfforts") &&
+      source.includes("enabledReasoningEfforts") &&
+      source.includes("defaultModel"))
+  );
 }
 
-export function transformShared(source: string): string {
-  ensureUnpatched(source);
-  const methods: MethodDefinition[] = [];
+/** Locate all relevant edits in one module; uniqueness is checked across modules. */
+export function findPatchEdits(source: string): PatchEdit[] {
+  const edits: PatchEdit[] = [];
   full(ast(source), (node) => {
-    if (node.type === "MethodDefinition")
-      methods.push(node as MethodDefinition);
-  });
-  const named = (name: string) =>
-    methods.filter(
-      (node) =>
-        node.key.type === "Identifier" &&
-        (node.key as Identifier).name === name,
-    );
-  const sender = single(
-    named("sendRequest").filter((node) =>
-      source
-        .slice(node.start, node.end)
-        .includes("AppServerRequestClient is missing a message dispatcher"),
-    ),
-    "renderer request dispatcher",
-  );
-  const warmer = single(
-    named("prewarmThreadStart").filter((node) =>
-      source.slice(node.start, node.end).includes("this.dispatchMessage"),
-    ),
-    "renderer prewarm dispatcher",
-  );
-  const defaults = single(
-    named("setDefaultModelConfig").filter((node) =>
-      source
-        .slice(node.start, node.end)
-        .includes("this.defaultTurnConfig.writeModel"),
-    ),
-    "default-model writer",
-  );
-  const output = new MagicString(source);
-  const body = (node: MethodDefinition) =>
-    source.slice(node.value.body!.start + 1, node.value.body!.end - 1);
-  const [method, params, options] = identifiers(sender.value.params);
-  if (!method || !params || !options)
-    throw new Error("Unexpected request dispatcher arity");
-  output.overwrite(
-    sender.value.body!.start + 1,
-    sender.value.body!.end - 1,
-    `return ${BINDING}.intercept(this,${method},${params},${options},async(${method},${params},${options})=>{${body(sender)}});`,
-  );
-  const [warmParams] = identifiers(warmer.value.params);
-  if (!warmParams) throw new Error("Unexpected prewarm dispatcher arity");
-  output.overwrite(
-    warmer.value.body!.start + 1,
-    warmer.value.body!.end - 1,
-    `return ${BINDING}.prewarm(this,${warmParams},async(${warmParams})=>{${body(warmer)}});`,
-  );
-  const [model, effort] = identifiers(defaults.value.params);
-  if (!model || !effort)
-    throw new Error("Unexpected default-model writer arity");
-  output.overwrite(
-    defaults.value.body!.start + 1,
-    defaults.value.body!.end - 1,
-    `return ${BINDING}.writeDefault(this.requestClient,${model},${effort},async()=>{${body(defaults)}});`,
-  );
-  output.prepend(IMPORT);
-  const result = output.toString();
-  ast(result);
-  return result;
-}
-
-/** Only expose entries tagged by our local registry; keep official gating intact. */
-export function transformPicker(source: string): string {
-  ensureUnpatched(source);
-  const matches: { node: FunctionDeclaration; model: string }[] = [];
-  const selectors: { node: FunctionDeclaration; models: string }[] = [];
-  full(ast(source), (node) => {
+    if (node.type === "MethodDefinition") {
+      const method = node as MethodDefinition;
+      if (method.key.type !== "Identifier" || !method.value.body) return;
+      const name = method.key.name;
+      const body = source.slice(
+        method.value.body.start + 1,
+        method.value.body.end - 1,
+      );
+      const replace = (point: PatchPoint, replacement: string) =>
+        edits.push({
+          point,
+          start: method.value.body!.start + 1,
+          end: method.value.body!.end - 1,
+          replacement,
+        });
+      if (
+        name === "sendRequest" &&
+        body.includes("AppServerRequestClient is missing a message dispatcher")
+      ) {
+        const [request, params, options] = identifiers(method.value.params);
+        if (!request || !params || !options)
+          throw new Error("Unexpected request dispatcher arity");
+        replace(
+          "request",
+          `return ${BINDING}.intercept(this,${request},${params},${options},async(${request},${params},${options})=>{${body}});`,
+        );
+      }
+      if (
+        name === "prewarmThreadStart" &&
+        body.includes("this.dispatchMessage")
+      ) {
+        const [params] = identifiers(method.value.params);
+        if (!params) throw new Error("Unexpected prewarm dispatcher arity");
+        replace(
+          "prewarm",
+          `return ${BINDING}.prewarm(this,${params},async(${params})=>{${body}});`,
+        );
+      }
+      if (
+        name === "setDefaultModelConfig" &&
+        body.includes("this.defaultTurnConfig.writeModel")
+      ) {
+        const [model, effort] = identifiers(method.value.params);
+        if (!model || !effort)
+          throw new Error("Unexpected default-model writer arity");
+        replace(
+          "defaults",
+          `return ${BINDING}.writeDefault(this.requestClient,${model},${effort},async()=>{${body}});`,
+        );
+      }
+    }
     if (node.type !== "FunctionDeclaration") return;
     const fn = node as FunctionDeclaration;
     const param = fn.params[0];
     if (param?.type !== "ObjectPattern") return;
-    const properties = (param as ObjectPattern).properties;
+    const properties = param.properties;
     const keys = properties.flatMap((property) =>
       property.type === "Property" && property.key.type === "Identifier"
         ? [property.key.name]
         : [],
     );
-    if (
-      ["models", "enabledReasoningEfforts", "defaultModel"].every((key) =>
-        keys.includes(key),
-      ) &&
-      source
-        .slice(fn.body.start, fn.body.end)
-        .includes(".supportedReasoningEfforts")
-    ) {
+    const body = source.slice(fn.body.start + 1, fn.body.end - 1);
+    const boundName = (key: string) => {
       for (const property of properties) {
         if (
           property.type === "Property" &&
           property.key.type === "Identifier" &&
-          property.key.name === "models" &&
+          property.key.name === key &&
           property.value.type === "Identifier"
         )
-          selectors.push({ node: fn, models: property.value.name });
+          return property.value.name;
       }
-    }
+      throw new Error(`Unexpected upstream binding for ${key}`);
+    };
     if (
-      ![
+      ["models", "enabledReasoningEfforts", "defaultModel"].every((key) =>
+        keys.includes(key),
+      ) &&
+      body.includes(".supportedReasoningEfforts")
+    ) {
+      edits.push({
+        point: "efforts",
+        start: fn.body.start + 1,
+        end: fn.body.end - 1,
+        replacement: `return ${BINDING}.restorePickerEfforts((()=>{${body}})(),${boundName("models")});`,
+      });
+    }
+    // Only the visibility predicate inspects the single model's access programs.
+    if (
+      [
         "model",
         "availableModels",
         "useHiddenModels",
         "hasConfiguredModelCatalog",
         "apiKeyDaybreakSupported",
-      ].every((key) => keys.includes(key))
-    )
-      return;
-    // The selector and filter both destructure catalog fields. Only the filter
-    // inspects the single model's access program bounds.
-    if (
-      !source
-        .slice(fn.body.start, fn.body.end)
-        .includes(".availableAccessPrograms?.cyber")
-    )
-      return;
-    for (const property of properties) {
-      if (
-        property.type === "Property" &&
-        property.key.type === "Identifier" &&
-        property.key.name === "model" &&
-        property.value.type === "Identifier"
-      ) {
-        matches.push({ node: fn, model: property.value.name });
-      }
+      ].every((key) => keys.includes(key)) &&
+      body.includes(".availableAccessPrograms?.cyber")
+    ) {
+      const model = boundName("model");
+      edits.push({
+        point: "visibility",
+        start: fn.body.start + 1,
+        end: fn.body.start + 1,
+        replacement: `if(${BINDING}.isRegisteredModel(${model}))return !${model}.hidden;`,
+      });
     }
   });
-  const { node, model } = single(matches, "model visibility predicate");
+  return edits;
+}
+
+export function applyEdits(
+  source: string,
+  edits: readonly PatchEdit[],
+  runtimeImport = DEFAULT_IMPORT,
+): string {
+  if (source.includes(BINDING))
+    throw new Error("Asset already contains the patch binding");
+  const sorted = [...edits].sort((a, b) => a.start - b.start);
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i - 1]!.end > sorted[i]!.start)
+      throw new Error("Overlapping upstream patch points");
+  }
   const output = new MagicString(source);
-  const selector = single(selectors, "reasoning-effort selector");
-  const selectorBody = source.slice(
-    selector.node.body.start + 1,
-    selector.node.body.end - 1,
+  for (const edit of sorted) {
+    if (edit.start === edit.end)
+      output.appendLeft(edit.start, edit.replacement);
+    else output.overwrite(edit.start, edit.end, edit.replacement);
+  }
+  output.prepend(
+    `import * as ${BINDING} from ${JSON.stringify(runtimeImport)};\n`,
   );
-  output.overwrite(
-    selector.node.body.start + 1,
-    selector.node.body.end - 1,
-    `return ${BINDING}.restorePickerEfforts((()=>{${selectorBody}})(),${selector.models});`,
-  );
-  output.appendLeft(
-    node.body.start + 1,
-    `if(${BINDING}.isRegisteredModel(${model}))return !${model}.hidden;`,
-  );
-  output.prepend(IMPORT);
   const result = output.toString();
   ast(result);
   return result;
 }
+
+/** Single-module helpers also used by the focused transformation tests. */
+function transform(source: string, points: readonly PatchPoint[]): string {
+  if (source.includes(BINDING))
+    throw new Error("Asset already contains the patch binding");
+  const edits = findPatchEdits(source).filter((edit) =>
+    points.includes(edit.point),
+  );
+  for (const point of points) {
+    const count = edits.filter((edit) => edit.point === point).length;
+    if (count !== 1)
+      throw new Error(
+        `Expected exactly one ${point} patch point; found ${count}`,
+      );
+  }
+  return applyEdits(source, edits);
+}
+
+export const transformShared = (source: string): string =>
+  transform(source, ["request", "prewarm", "defaults"]);
+export const transformPicker = (source: string): string =>
+  transform(source, ["visibility", "efforts"]);

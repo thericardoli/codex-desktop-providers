@@ -1,14 +1,18 @@
 # Codex Desktop Providers
 
-An independent, version-checked patch that adds directly connected third-party
+An independent, structure-based patch that adds directly connected third-party
 models to Codex Desktop's native model menu alongside ChatGPT subscription models.
 It reuses Codex's provider configuration, credentials, transport, and agent loop.
 
 There is no local gateway and no protocol translation. An upstream provider must
 support Codex's Responses API requests, streaming, and tool calling.
 
-Currently supported: Linux x86_64 desktop **26.1007.71326**. The application is
-proprietary; this repository contains the patch and synthetic tests only.
+Every Desktop version is eligible: there is no version or source-hash allowlist.
+The patch discovers its code boundaries across renderer modules, independently
+of hashed filenames and bundling layout. Missing or ambiguous structural matches
+fail before writing. Tested on Linux x86_64 desktop **26.1007.71326**; this is test
+evidence, not a compatibility restriction. The application is proprietary; this
+repository contains the patch and synthetic tests only.
 
 ## Configure models
 
@@ -140,9 +144,11 @@ writing anything. To apply to a **disposable copy** or a package build directory
 node dist/cli.js patch --asar /build/chatgpt/usr/lib/chatgpt/resources/app.asar
 ```
 
-An existing identical patch is verified and left untouched. A different patch,
-unsupported app version, mismatched asset hash, or ambiguous structural match
-fails before writing. Rebuild from the clean upstream package to update the patch.
+An existing identical patch is verified and left untouched. A different installed
+patch, damaged patched assets, or missing/ambiguous code boundaries fails before
+writing. Rebuild from the clean upstream package to update the patch. Source
+hashes are recorded for provenance, not compared against predefined values.
+Desktop version strings are informational and never decide patch eligibility.
 
 ## Nix: build from the GitHub flake
 
@@ -167,69 +173,31 @@ The tool builds from source locally and runs version, type, unit-test, and forma
 checks. No release asset is required. This is the arrangement used by the local
 consumer in `/home/ricardo/nixos-config`.
 
-The tool exposes `passthru.desktop` as the authoritative supported Desktop
-version, download URL, and hash. A consuming desktop derivation can use:
+Keep the Desktop version and official download hash in your own existing Desktop
+package. They are independent of this patch's version and the CI test fixture.
+Add the tool as a build dependency and invoke it in your package's `postPatch`:
 
 ```nix
-let
-  desktop = codex-desktop-providers.desktop;
-in
-stdenvNoCC.mkDerivation {
-  pname = "chatgpt";
-  inherit (desktop) version;
-  src = fetchurl { inherit (desktop) url hash; };
-  nativeBuildInputs = [ codex-desktop-providers ];
-  postPatch = ''
-    ${lib.getExe codex-desktop-providers} patch \
-      --asar usr/lib/chatgpt/resources/app.asar
-  '';
-  # Keep the rest of your existing Desktop packaging here.
-}
+nativeBuildInputs = [ codex-desktop-providers ];
+postPatch = ''
+  ${lib.getExe codex-desktop-providers} patch \
+    --asar usr/lib/chatgpt/resources/app.asar
+'';
 ```
 
-Updating the source input's lock updates the patch and supported Desktop together.
-See [maintenance](docs/maintenance.md) for upgrade and release commands.
-
-For development, the Git checkout remains buildable from source:
+Build and check locally:
 
 ```sh
 nix build .#codex-desktop-providers
 nix flake check
 ```
 
-Standalone flake checks also download the pinned original Desktop and validate
-its patch on a disposable archive. CI runs these checks on every push and pull
-request, and builds and smoke-tests a portable patch archive.
-
-### Optional prebuilt releases
-
-Pushing a matching version tag such as `v0.5.0` also publishes a compiled portable
-tool, production dependencies, a Nix installer, provenance, and SHA256SUMS to
-GitHub Releases. Desktop archives and credentials are never distributed. This is
-an optional distribution channel; the GitHub flake above continues to build from
-source locally.
-
-To explicitly choose a prebuilt download instead, use a non-flake input:
-
-```nix
-inputs.codex-desktop-providers = {
-  url = "https://github.com/thericardoli/codex-desktop-providers/releases/download/v0.5.0/codex-desktop-providers.tar.gz";
-  flake = false;
-};
-```
-
-For this alternative, use `callPackage` instead of the flake's package output:
-
-```nix
-codex-desktop-providers = final.callPackage "${inputs.codex-desktop-providers}/nix/package.nix" {
-  source = inputs.codex-desktop-providers;
-};
-```
-
-The release installer copies compiled files and wraps them using Nix's Node.js,
-without npm installation or TypeScript compilation. `flake.lock` pins the entire
-unpacked archive's NAR hash. A floating `latest` download URL is unnecessary.
-No Cachix account or signing key is needed for either mode.
+CI checks and builds source on main pushes, pull requests, and manual dispatch.
+It does not publish GitHub Releases, portable bundles, or build artifacts.
+Standalone flake checks download the original Desktop pinned in
+`nix/upstream.json` and exercise the patch on a disposable archive. That pin is a
+test fixture only: it is not read by the patcher or exported as the consumer's
+Desktop version. New Desktop releases do not require updating a version allowlist.
 
 Building does not activate the configuration or restart a running desktop.
 After activation, completely quit and reopen the app to load the patched assets.

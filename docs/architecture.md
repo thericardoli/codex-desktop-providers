@@ -39,6 +39,13 @@ MagicString wraps the existing function bodies; scheduling, errors, and tracing
 remain in the original implementation. Imports reference our own isolated ES
 module directory, avoiding modifications to hashed upstream import graphs.
 
+`src/patch/discovery.ts` enumerates packed renderer JavaScript under `webview/`.
+It uses code markers to skip unrelated assets and collects structural edits from
+all candidate modules. Every patch point must be unique globally. There are no
+version adapters or source fingerprint allowlists. Modules may be renamed,
+combined, nested in subdirectories, or split; imports are resolved relative to
+the discovered paths. Desktop version metadata is diagnostic only.
+
 ## Archive handling
 
 The official `@electron/asar` reader parses and verifies entries. The writer

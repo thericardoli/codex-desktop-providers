@@ -1,4 +1,4 @@
-# Download upstream only for build-time CI validation; never include it in releases.
+# This pinned download is a test fixture, not a patch compatibility restriction.
 {
   runCommand,
   fetchurl,
@@ -7,7 +7,7 @@
   package,
 }:
 let
-  desktop = package.desktop;
+  desktop = builtins.fromJSON (builtins.readFile ./upstream.json);
   upstream = fetchurl { inherit (desktop) url hash; };
 in
 runCommand "codex-desktop-providers-upstream-${desktop.version}"

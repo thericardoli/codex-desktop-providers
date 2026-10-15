@@ -1,9 +1,8 @@
-name: Build and release
+name: Check and build
 
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -12,7 +11,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -26,53 +25,7 @@ jobs:
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
-      - name: Check source package
+      - name: Check source and upstream integration
         run: nix flake check --print-build-logs
       - name: Build tool
-        run: nix build --print-build-logs
-      - name: Create portable release
-        env:
-          RELEASE_REVISION: ${{ github.sha }}
-          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
-        run: |
-          releaseArgs=(
-            --package "$(readlink -f result)/lib/node_modules/codex-desktop-providers"
-            --revision "$RELEASE_REVISION"
-          )
-          if [[ -n "$RELEASE_TAG" ]]; then
-            releaseArgs+=(--tag "$RELEASE_TAG")
-          fi
-          nix develop --command node scripts/build-release.mjs "${releaseArgs[@]}"
-      - name: Check downloaded-package installation
-        run: |
-          mkdir -p release-test
-          tar -xzf release/codex-desktop-providers.tar.gz -C release-test --strip-components=1
-          nix build "path:$PWD/release-test" --out-link release-result --print-build-logs
-          release-result/bin/codex-desktop-providers --help
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: codex-desktop-providers
-          path: release/*
-          if-no-files-found: error
-          retention-days: 14
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: codex-desktop-providers
-          path: release
-      - name: Publish GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          gh release create "$RELEASE_TAG" release/* \
-            --verify-tag --title "$RELEASE_TAG" --generate-notes
+        run: nix build --no-link --print-build-logs

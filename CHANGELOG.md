@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0
+
+- Remove CI release publishing, portable bundle generation, and prebuilt Nix
+  installation; keep source checks and builds only.
+- Attempt every Desktop version without version or asset-fingerprint allowlists.
+- Discover all five patch points across renderer assets, supporting renamed,
+  nested, merged, and split modules with relative runtime imports.
+- Keep unique structural matches, atomic ASAR writes, idempotence, and installed
+  patch integrity checks.
+- Decouple the CI Desktop fixture from the consumer's own Desktop version pin.
+
 ## 0.5.0
 
 - Build and test with GitHub Actions; publish portable patch-tool archives and

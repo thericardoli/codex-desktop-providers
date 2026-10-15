@@ -5,7 +5,7 @@ import { parseArgs } from "node:util";
 import { extractFile } from "@electron/asar";
 import { parse } from "acorn";
 import { full } from "acorn-walk";
-import { ADAPTERS } from "../dist/patch/adapters.js";
+import { MANIFEST_PATH } from "../dist/patch/constants.js";
 import * as runtime from "../dist/runtime/index.js";
 
 const { values } = parseArgs({ options: { asar: { type: "string" } } });
@@ -13,24 +13,28 @@ if (!values.asar)
   throw new Error("Expected --asar PATH to a patched disposable archive");
 const archive = values.asar;
 const version = JSON.parse(extractFile(archive, "package.json")).version;
-const adapter = ADAPTERS.find((candidate) => candidate.version === version);
-if (!adapter) throw new Error(`No adapter for ${version}`);
-const shared = extractFile(archive, adapter.shared.path).toString();
-const picker = extractFile(archive, adapter.picker.path).toString();
+const manifest = JSON.parse(extractFile(archive, MANIFEST_PATH));
+const sources = Object.keys(manifest.inputs).map((path) =>
+  extractFile(archive, path).toString(),
+);
 const methods = [];
-full(parse(shared, { ecmaVersion: "latest", sourceType: "module" }), (node) => {
-  if (node.type !== "MethodDefinition") return;
-  const source = shared.slice(node.start, node.end);
-  if (
-    source.includes("__codexDesktopProviders.") &&
-    ["sendRequest", "prewarmThreadStart", "setDefaultModelConfig"].includes(
-      node.key.name,
-    )
-  )
-    methods.push(source);
-});
+for (const shared of sources)
+  full(
+    parse(shared, { ecmaVersion: "latest", sourceType: "module" }),
+    (node) => {
+      if (node.type !== "MethodDefinition") return;
+      const source = shared.slice(node.start, node.end);
+      if (
+        source.includes("__codexDesktopProviders.") &&
+        ["sendRequest", "prewarmThreadStart", "setDefaultModelConfig"].includes(
+          node.key.name,
+        )
+      )
+        methods.push(source);
+    },
+  );
 assert.equal(methods.length, 3);
-// The version adapter's prewarm path calls this upstream tracing helper. It is
+// The tested upstream fixture's prewarm path calls this upstream tracing helper. It is
 // stubbed here so this test remains independent of Electron and telemetry.
 const PatchedClient = Function(
   "__codexDesktopProviders",
@@ -113,17 +117,21 @@ assert.equal(calls.at(-1).params.config.model_reasoning_effort, "low");
 let filterSource;
 let filterName;
 let selectorSource;
-full(parse(picker, { ecmaVersion: "latest", sourceType: "module" }), (node) => {
-  if (node.type !== "FunctionDeclaration") return;
-  const source = picker.slice(node.start, node.end);
-  if (source.includes("__codexDesktopProviders.isRegisteredModel(")) {
-    assert.equal(filterSource, undefined);
-    filterSource = source;
-    filterName = node.id.name;
-  }
-  if (source.includes("__codexDesktopProviders.restorePickerEfforts("))
-    selectorSource = source;
-});
+for (const picker of sources)
+  full(
+    parse(picker, { ecmaVersion: "latest", sourceType: "module" }),
+    (node) => {
+      if (node.type !== "FunctionDeclaration") return;
+      const source = picker.slice(node.start, node.end);
+      if (source.includes("__codexDesktopProviders.isRegisteredModel(")) {
+        assert.equal(filterSource, undefined);
+        filterSource = source;
+        filterName = node.id.name;
+      }
+      if (source.includes("__codexDesktopProviders.restorePickerEfforts("))
+        selectorSource = source;
+    },
+  );
 assert.ok(filterSource);
 const visible = Function(
   "__codexDesktopProviders",
