@@ -17,12 +17,14 @@ export interface RegisteredModel {
   provider: string;
   providerName: string;
   effort: string;
+  efforts: string[];
   config: JsonObject;
 }
 
 export interface Registry {
   models: Map<string, RegisteredModel>;
   threads: Map<string, string>;
+  selections: Map<string, string>;
   loadedAt: number;
 }
 

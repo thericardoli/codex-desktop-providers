@@ -13,7 +13,7 @@ const MODEL_OPTIONS = [
   "model_verbosity",
 ] as const;
 
-const EFFORTS = new Set([
+const EFFORT_ORDER = [
   "none",
   "minimal",
   "low",
@@ -22,7 +22,8 @@ const EFFORTS = new Set([
   "xhigh",
   "max",
   "ultra",
-]);
+] as const;
+const EFFORTS = new Set<string>(EFFORT_ORDER);
 
 export function readProfiles(config: JsonObject): Map<string, RegisteredModel> {
   const providers = object(config.model_providers) ?? {};
@@ -54,11 +55,6 @@ export function readProfiles(config: JsonObject): Map<string, RegisteredModel> {
     if (!model) {
       throw new Error(`[desktop-providers] Profile ${name} has an empty model`);
     }
-    if (models.has(model)) {
-      throw new Error(
-        `[desktop-providers] Model ${model} occurs in multiple profiles; use a unique model ID per registered profile`,
-      );
-    }
     const effort = profile.model_reasoning_effort ?? "medium";
     if (typeof effort !== "string" || !EFFORTS.has(effort)) {
       throw new Error(
@@ -73,6 +69,30 @@ export function readProfiles(config: JsonObject): Map<string, RegisteredModel> {
     }
     // Never inherit an official model's ultra effort when starting this model.
     tuning.model_reasoning_effort = effort;
+    const previous = models.get(model);
+    if (previous) {
+      if (previous.provider !== profile.model_provider) {
+        throw new Error(
+          `[desktop-providers] Model ${model} occurs on multiple providers; its routing would be ambiguous`,
+        );
+      }
+      for (const [key, value] of Object.entries(tuning)) {
+        if (key === "model_reasoning_effort") continue;
+        if (
+          previous.config[key] !== undefined &&
+          previous.config[key] !== value
+        ) {
+          throw new Error(
+            `[desktop-providers] Conflicting ${key} for ${model} in profiles ${previous.profile} and ${name}`,
+          );
+        }
+        previous.config[key] = value;
+      }
+      previous.efforts = EFFORT_ORDER.filter(
+        (value) => value === effort || previous.efforts.includes(value),
+      );
+      continue;
+    }
     models.set(model, {
       profile: name,
       model,
@@ -82,6 +102,7 @@ export function readProfiles(config: JsonObject): Map<string, RegisteredModel> {
           ? provider.name
           : profile.model_provider,
       effort,
+      efforts: [effort],
       config: tuning,
     });
   }
@@ -123,12 +144,10 @@ export function appendModels(
       // Conservative picker metadata; inference capabilities remain the native
       // backend/provider's responsibility, not an invented copy of GPT metadata.
       inputModalities: ["text"],
-      supportedReasoningEfforts: [
-        {
-          reasoningEffort: entry.effort,
-          description: `${entry.effort} effort`,
-        },
-      ],
+      supportedReasoningEfforts: entry.efforts.map((reasoningEffort) => ({
+        reasoningEffort,
+        description: `${reasoningEffort} effort`,
+      })),
       defaultReasoningEffort: entry.effort,
       upgrade: null,
       [MARKER]: entry.provider,
@@ -137,4 +156,55 @@ export function appendModels(
   // params is accepted to keep this function aligned with the request contract.
   void params;
   return { ...response, data: [...response.data, ...additions] };
+}
+
+/** Native account-level effort toggles apply to native models. For explicitly
+ * registered models the native profile declarations are the capability list. */
+export function restorePickerEfforts(
+  result: JsonObject,
+  catalog: unknown[],
+): JsonObject {
+  if (!Array.isArray(result.models)) return result;
+  const registered = new Map(
+    catalog.flatMap((value) => {
+      const model = object(value);
+      return isRegisteredModel(model) ? [[model!.model, model!] as const] : [];
+    }),
+  );
+  if (!registered.size) return result;
+  const models = result.models.map((value) => {
+    const model = object(value);
+    const source = registered.get(model?.model);
+    return source
+      ? {
+          ...model,
+          supportedReasoningEfforts: source.supportedReasoningEfforts,
+          defaultReasoningEffort: source.defaultReasoningEffort,
+        }
+      : value;
+  });
+  const defaultId = object(result.defaultModel)?.model;
+  return {
+    ...result,
+    models,
+    defaultModel:
+      defaultId === undefined
+        ? result.defaultModel
+        : (models.find((value) => object(value)?.model === defaultId) ??
+          result.defaultModel),
+    hasModelSupportingMaxReasoningEffort:
+      result.hasModelSupportingMaxReasoningEffort === true ||
+      [...registered.values()].some((model) =>
+        (model.supportedReasoningEfforts as JsonObject[]).some(
+          (entry) => entry.reasoningEffort === "max",
+        ),
+      ),
+    hasModelSupportingUltraReasoningEffort:
+      result.hasModelSupportingUltraReasoningEffort === true ||
+      [...registered.values()].some((model) =>
+        (model.supportedReasoningEfforts as JsonObject[]).some(
+          (entry) => entry.reasoningEffort === "ultra",
+        ),
+      ),
+  };
 }

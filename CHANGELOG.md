@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0
+
+- Merge same-model/provider native profiles into selectable reasoning strengths.
+- Preserve declared custom choices through desktop effort filtering.
+- Respect explicit effort, remember the session default for prewarming, and keep
+  native per-chat effort on follow-ups and resume.
+- Exercise the real patched effort selector and native low/medium requests.
+
 ## 0.1.0
 
 - Support desktop 26.1007.71326 on Linux x86_64 with exact asset fingerprints.

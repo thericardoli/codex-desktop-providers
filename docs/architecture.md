@@ -25,13 +25,15 @@ unrelated to model tuning are deliberately not copied into thread overrides.
 
 ## Boundaries in upstream code
 
-`src/patch/transforms.ts` locates four semantic boundaries with Acorn:
+`src/patch/transforms.ts` locates five semantic boundaries with Acorn:
 
 - `AppServerRequestClient.sendRequest`
 - `AppServerRequestClient.prewarmThreadStart`
 - The conversation manager's `setDefaultModelConfig`
 - The model visibility predicate, identified by destructured property names
   and its access-program check rather than a minified function name
+- The model/effort selector, restoring explicitly registered third-party options
+  after native account-level filtering while retaining native model behavior
 
 MagicString wraps the existing function bodies; scheduling, errors, and tracing
 remain in the original implementation. Imports reference our own isolated ES
@@ -59,3 +61,9 @@ with `thread/read`. The runtime does not persist its own routing database.
 The desktop's own temporary model override holds third-party default selection.
 This prevents UI selection from writing a third-party ID into the global OpenAI
 configuration used by CLI and background tasks.
+
+Profiles for the same model/provider aggregate reasoning strengths in canonical
+order. The alphabetically first profile supplies the default; conflicting shared
+tuning is rejected. Explicit request effort takes precedence over in-memory
+selection, then the profile default. Missing effort on follow-ups/resume is left
+to native per-chat persistence, so changing to low is not undone by the next turn.

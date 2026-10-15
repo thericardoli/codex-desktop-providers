@@ -42,8 +42,44 @@ Restart the patched desktop after registration. Start a **new local Codex chat**
 and select `z-ai/glm-5.3-flash (OpenRouter)`. Official model entries retain their
 native availability checks and use your existing ChatGPT login.
 
-The explicit profile reasoning effort is used for this model. Picker metadata
-advertises text input and this one effort conservatively. Registration does not
+## Configure selectable reasoning effort
+
+Profiles with the **same model and provider** merge into one model menu entry.
+Each profile's `model_reasoning_effort` adds a selectable strength. For example,
+keep the main profile above as the default and add:
+
+```toml
+[profiles.openrouter-glm-5-3-flash-low]
+model = "z-ai/glm-5.3-flash"
+model_provider = "openrouter"
+model_reasoning_effort = "low"
+
+[profiles.openrouter-glm-5-3-flash-medium]
+model = "z-ai/glm-5.3-flash"
+model_provider = "openrouter"
+model_reasoning_effort = "medium"
+```
+
+This exposes **low / medium / high**, with **high** as the default. The
+alphabetically first profile for a model determines its default; the unsuffixed
+main profile sorts before its `-low` and `-medium` variants. Effort options are
+deduplicated and ordered by strength. Other overlapping model-tuning values must
+agree; variant profiles may omit shared tuning such as context-window size.
+Removing an effort profile removes that choice after config reload/restart.
+
+Select the strength using the existing desktop reasoning/power selector. The
+patch retains declared third-party choices through native model-list filtering,
+forwards the chosen effort in both ordinary and collaboration-mode requests,
+and applies it to new-chat prewarming. Omitted effort on follow-ups and resume
+preserves native per-chat state. An unsupported stale value inherited from a
+different model falls back to this model's configured default. Session default
+selection remains in memory; it does not change global OpenAI settings.
+
+Register only strengths your upstream supports. Native effort names accepted by
+the patch are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and
+`ultra`; configuration alone does not add a capability to an upstream model.
+
+Picker metadata advertises text input conservatively. Registration does not
 prove a provider supports every Codex tool, image format, or advanced desktop
 feature; inference capabilities remain controlled by the actual provider/backend.
 
@@ -97,7 +133,7 @@ After activation, completely quit and reopen the app to load the patched assets.
 - Provider is fixed per chat. Attempting to select a different provider in an
   existing chat is rejected; start a new chat instead. Resume and prewarm paths
   reuse the same routing rules.
-- Each registered model ID must be unique. The same upstream ID on multiple
+- Each registered model ID must identify one provider. The same upstream ID on multiple
   providers, or an ID already in the native catalog, is rejected as ambiguous.
 - Third-party default selection uses the desktop's existing in-memory override.
   It does not rewrite the global OpenAI default and is not persisted across app

@@ -5,6 +5,7 @@ import {
   appendModels,
   isRegisteredModel,
   readProfiles,
+  restorePickerEfforts,
 } from "../src/runtime/registry.js";
 import {
   object,
@@ -30,6 +31,16 @@ const config = () => ({
       model_context_window: 1048576,
       approval_policy: "never",
       developer_instructions: "must not be copied",
+    },
+    "glm-low": {
+      model: MODEL,
+      model_provider: "openrouter",
+      model_reasoning_effort: "low",
+    },
+    "glm-medium": {
+      model: MODEL,
+      model_provider: "openrouter",
+      model_reasoning_effort: "medium",
     },
   },
 });
@@ -119,7 +130,7 @@ test("ignore official and non-model profiles", () => {
   );
 });
 
-test("reject undefined, incompatible, duplicate and invalid-effort registrations", () => {
+test("reject undefined, incompatible, ambiguous and invalid-effort registrations", () => {
   assert.throws(
     () => readProfiles({ profiles: config().profiles }),
     /undefined provider/,
@@ -136,9 +147,16 @@ test("reject undefined, incompatible, duplicate and invalid-effort registrations
     () =>
       readProfiles({
         ...config(),
-        profiles: { ...config().profiles, duplicate: config().profiles.glm },
+        model_providers: {
+          ...config().model_providers,
+          other: { wire_api: "responses" },
+        },
+        profiles: {
+          ...config().profiles,
+          duplicate: { ...config().profiles.glm, model_provider: "other" },
+        },
       }),
-    /multiple profiles/,
+    /multiple providers/,
   );
   assert.throws(
     () =>
@@ -257,7 +275,6 @@ test("verify persisted provider before resuming a custom model", async () => {
   await client.sendRequest("thread/resume", { threadId: "old", model: MODEL });
   assert.deepEqual(calls.at(-1)?.params?.config, {
     model_context_window: 1048576,
-    model_reasoning_effort: "high",
   });
   assert.equal(calls.at(-1)?.params?.effort, undefined);
   threads.set("official", "openai");
@@ -299,12 +316,120 @@ test("custom default selection does not write global model/provider or credentia
     writes++;
     return { status: "ok" };
   };
-  assert.deepEqual(await writeDefault(client, MODEL, write), {
+  assert.deepEqual(await writeDefault(client, MODEL, "high", write), {
     status: "okOverridden",
   });
   assert.equal(writes, 0);
-  await writeDefault(client, "native-gpt", write);
+  await writeDefault(client, "native-gpt", "high", write);
   assert.equal(writes, 1);
+});
+
+test("merge effort profiles into one ordered model and retain the primary default", () => {
+  const entries = readProfiles(config());
+  assert.equal(entries.size, 1);
+  assert.equal(entries.get(MODEL)?.effort, "high");
+  assert.deepEqual(entries.get(MODEL)?.efforts, ["low", "medium", "high"]);
+  const catalog = appendModels({ data: [] }, entries).data as JsonObject[];
+  assert.deepEqual(
+    catalog[0]?.supportedReasoningEfforts,
+    ["low", "medium", "high"].map((reasoningEffort) => ({
+      reasoningEffort,
+      description: `${reasoningEffort} effort`,
+    })),
+  );
+  assert.throws(
+    () =>
+      readProfiles({
+        ...config(),
+        profiles: {
+          ...config().profiles,
+          "glm-low": {
+            ...config().profiles["glm-low"],
+            model_context_window: 128000,
+          },
+        },
+      }),
+    /Conflicting model_context_window/,
+  );
+});
+
+test("keep declared effort options despite native account filtering without changing native models", () => {
+  const catalog = appendModels({ data: [] }, readProfiles(config()))
+    .data as JsonObject[];
+  const native = {
+    model: "native-gpt",
+    supportedReasoningEfforts: [{ reasoningEffort: "high" }],
+  };
+  const custom = { ...catalog[0], supportedReasoningEfforts: [] };
+  const result = restorePickerEfforts(
+    { models: [native, custom], defaultModel: custom },
+    catalog,
+  );
+  assert.equal((result.models as JsonObject[])[0], native);
+  assert.deepEqual(
+    (result.models as JsonObject[])[1]?.supportedReasoningEfforts,
+    catalog[0]?.supportedReasoningEfforts,
+  );
+  assert.equal(result.defaultModel, (result.models as JsonObject[])[1]);
+});
+
+test("honor selected effort in new chats, collaboration modes, and ordinary turns", async () => {
+  const { client, calls } = fixture();
+  await client.sendRequest("thread/start", {
+    model: MODEL,
+    config: { model_reasoning_effort: "low" },
+  });
+  assert.equal(
+    object(calls.at(-1)?.params?.config)?.model_reasoning_effort,
+    "low",
+  );
+  await client.sendRequest("turn/start", {
+    threadId: "thread-0",
+    collaborationMode: {
+      mode: "default",
+      settings: { model: MODEL, reasoning_effort: "medium" },
+    },
+    effort: "high",
+  });
+  assert.equal(
+    object(object(calls.at(-1)?.params?.collaborationMode)?.settings)
+      ?.reasoning_effort,
+    "medium",
+  );
+  assert.equal(calls.at(-1)?.params?.effort, "medium");
+  await client.sendRequest("turn/start", {
+    threadId: "thread-0",
+    model: MODEL,
+    effort: "low",
+  });
+  assert.equal(calls.at(-1)?.params?.effort, "low");
+  const followup = { threadId: "thread-0", model: MODEL };
+  await client.sendRequest("turn/start", followup);
+  assert.equal(calls.at(-1)?.params, followup);
+});
+
+test("remember effort for subsequent new chats and prewarming without global writes", async () => {
+  const { client, calls } = fixture();
+  await writeDefault(client, MODEL, "low", async () => {
+    throw Error("must not persist");
+  });
+  await client.sendRequest("thread/start", { model: MODEL });
+  assert.equal(
+    object(calls.at(-1)?.params?.config)?.model_reasoning_effort,
+    "low",
+  );
+  await prewarm(client, { model: MODEL }, async (params) => {
+    assert.equal(object(params.config)?.model_reasoning_effort, "low");
+    return {};
+  });
+  await client.sendRequest("thread/resume", {
+    threadId: "thread-0",
+    model: MODEL,
+  });
+  assert.equal(
+    object(calls.at(-1)?.params?.config)?.model_reasoning_effort,
+    undefined,
+  );
 });
 
 test("leave remote and cloud requests outside the patch", async () => {

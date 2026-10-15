@@ -3,11 +3,12 @@ import {
   object,
   type JsonObject,
   type Registry,
+  type RegisteredModel,
   type RequestClient,
   type Sender,
 } from "./types.js";
 
-export { isRegisteredModel };
+export { isRegisteredModel, restorePickerEfforts } from "./registry.js";
 
 const registries = new WeakMap<RequestClient, Promise<Registry>>();
 const CONFIG_CACHE_MS = 30_000;
@@ -32,6 +33,9 @@ async function registry(client: RequestClient): Promise<Registry> {
     return {
       models: readProfiles(config),
       threads: previous ? (await previous).threads : new Map<string, string>(),
+      selections: previous
+        ? (await previous).selections
+        : new Map<string, string>(),
       loadedAt: Date.now(),
     };
   })();
@@ -65,6 +69,20 @@ function requestedModel(params?: JsonObject | null): string | undefined {
   return typeof model === "string" ? model : undefined;
 }
 
+function requestedEffort(params: JsonObject): unknown {
+  return (
+    object(object(params.collaborationMode)?.settings)?.reasoning_effort ??
+    params.effort ??
+    object(params.config)?.model_reasoning_effort
+  );
+}
+
+function supportedEffort(entry: RegisteredModel, value: unknown): string {
+  return typeof value === "string" && entry.efforts.includes(value)
+    ? value
+    : entry.effort;
+}
+
 async function prepare(
   client: RequestClient,
   state: Registry,
@@ -87,7 +105,14 @@ async function prepare(
     return {
       ...params,
       modelProvider: entry.provider,
-      config: { ...entry.config, ...object(params.config) },
+      config: {
+        ...entry.config,
+        ...object(params.config),
+        model_reasoning_effort: supportedEffort(
+          entry,
+          requestedEffort(params) ?? state.selections.get(entry.model),
+        ),
+      },
     };
   }
   if (
@@ -128,13 +153,23 @@ async function prepare(
     }
     if (entry) {
       if (method !== "turn/start") {
+        const tuning = { ...entry.config };
+        delete tuning.model_reasoning_effort;
+        const config = { ...tuning, ...object(params.config) };
+        if (requestedEffort(params) != null)
+          config.model_reasoning_effort = supportedEffort(
+            entry,
+            requestedEffort(params),
+          );
         return {
           ...params,
-          config: { ...entry.config, ...object(params.config) },
+          config,
         };
       }
-      // The picker has no reliable capability discovery for arbitrary upstreams.
-      // Use the explicitly registered effort rather than inheriting GPT's effort.
+      // Omitted effort inherits native per-chat state; never reset the last
+      // chosen strength merely because a follow-up omitted the field.
+      if (requestedEffort(params) == null) return params;
+      const effort = supportedEffort(entry, requestedEffort(params));
       const mode = object(params.collaborationMode);
       return {
         ...params,
@@ -144,12 +179,12 @@ async function prepare(
                 ...mode,
                 settings: {
                   ...object(mode.settings),
-                  reasoning_effort: entry.effort,
+                  reasoning_effort: effort,
                 },
               },
             }
           : {}),
-        effort: entry.effort,
+        effort,
       };
     }
   }
@@ -222,10 +257,16 @@ export async function prewarm(
 export async function writeDefault(
   client: RequestClient,
   model: string,
+  effort: unknown,
   original: () => Promise<unknown>,
 ): Promise<unknown> {
-  if (client.hostId === "local" && (await registry(client)).models.has(model)) {
-    return { status: "okOverridden" };
+  if (client.hostId === "local") {
+    const state = await registry(client);
+    const entry = state.models.get(model);
+    if (entry) {
+      state.selections.set(model, supportedEffort(entry, effort));
+      return { status: "okOverridden" };
+    }
   }
   return original();
 }

@@ -91,12 +91,13 @@ export function transformShared(source: string): string {
     warmer.value.body!.end - 1,
     `return ${BINDING}.prewarm(this,${warmParams},async(${warmParams})=>{${body(warmer)}});`,
   );
-  const [model] = identifiers(defaults.value.params);
-  if (!model) throw new Error("Unexpected default-model writer arity");
+  const [model, effort] = identifiers(defaults.value.params);
+  if (!model || !effort)
+    throw new Error("Unexpected default-model writer arity");
   output.overwrite(
     defaults.value.body!.start + 1,
     defaults.value.body!.end - 1,
-    `return ${BINDING}.writeDefault(this.requestClient,${model},async()=>{${body(defaults)}});`,
+    `return ${BINDING}.writeDefault(this.requestClient,${model},${effort},async()=>{${body(defaults)}});`,
   );
   output.prepend(IMPORT);
   const result = output.toString();
@@ -108,6 +109,7 @@ export function transformShared(source: string): string {
 export function transformPicker(source: string): string {
   ensureUnpatched(source);
   const matches: { node: FunctionDeclaration; model: string }[] = [];
+  const selectors: { node: FunctionDeclaration; models: string }[] = [];
   full(ast(source), (node) => {
     if (node.type !== "FunctionDeclaration") return;
     const fn = node as FunctionDeclaration;
@@ -119,6 +121,24 @@ export function transformPicker(source: string): string {
         ? [property.key.name]
         : [],
     );
+    if (
+      ["models", "enabledReasoningEfforts", "defaultModel"].every((key) =>
+        keys.includes(key),
+      ) &&
+      source
+        .slice(fn.body.start, fn.body.end)
+        .includes(".supportedReasoningEfforts")
+    ) {
+      for (const property of properties) {
+        if (
+          property.type === "Property" &&
+          property.key.type === "Identifier" &&
+          property.key.name === "models" &&
+          property.value.type === "Identifier"
+        )
+          selectors.push({ node: fn, models: property.value.name });
+      }
+    }
     if (
       ![
         "model",
@@ -150,6 +170,16 @@ export function transformPicker(source: string): string {
   });
   const { node, model } = single(matches, "model visibility predicate");
   const output = new MagicString(source);
+  const selector = single(selectors, "reasoning-effort selector");
+  const selectorBody = source.slice(
+    selector.node.body.start + 1,
+    selector.node.body.end - 1,
+  );
+  output.overwrite(
+    selector.node.body.start + 1,
+    selector.node.body.end - 1,
+    `return ${BINDING}.restorePickerEfforts((()=>{${selectorBody}})(),${selector.models});`,
+  );
   output.appendLeft(
     node.body.start + 1,
     `if(${BINDING}.isRegisteredModel(${model}))return !${model}.hidden;`,

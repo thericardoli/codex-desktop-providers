@@ -49,6 +49,16 @@ client.sendConfigReadRequest = async () => ({
       openrouter: { name: "OpenRouter", wire_api: "responses" },
     },
     profiles: {
+      "glm-low": {
+        model,
+        model_provider: "openrouter",
+        model_reasoning_effort: "low",
+      },
+      "glm-medium": {
+        model,
+        model_provider: "openrouter",
+        model_reasoning_effort: "medium",
+      },
       glm: {
         model,
         model_provider: "openrouter",
@@ -77,6 +87,10 @@ const list = await client.sendRequest("model/list", {}, {});
 assert.equal(list.data.length, 2);
 assert.equal(list.data[0].model, "gpt");
 assert.equal(list.data[1].model, model);
+assert.deepEqual(
+  list.data[1].supportedReasoningEfforts.map((entry) => entry.reasoningEffort),
+  ["low", "medium", "high"],
+);
 await client.sendRequest("thread/start", { model }, {});
 assert.equal(calls.at(-1).params.modelProvider, "openrouter");
 await client.prewarmThreadStart({ model }, { trace: {} });
@@ -86,17 +100,24 @@ client.defaultTurnConfig = {
     throw new Error("Custom model must not overwrite the global default");
   },
 };
-assert.deepEqual(await client.setDefaultModelConfig(model, "high", null), {
+assert.deepEqual(await client.setDefaultModelConfig(model, "low", null), {
   status: "okOverridden",
 });
+await client.prewarmThreadStart({ model }, { trace: {} });
+assert.equal(calls.at(-1).params.config.model_reasoning_effort, "low");
 let filterSource;
+let filterName;
+let selectorSource;
 full(parse(picker, { ecmaVersion: "latest", sourceType: "module" }), (node) => {
   if (node.type !== "FunctionDeclaration") return;
   const source = picker.slice(node.start, node.end);
   if (source.includes("__codexDesktopProviders.isRegisteredModel(")) {
     assert.equal(filterSource, undefined);
     filterSource = source;
+    filterName = node.id.name;
   }
+  if (source.includes("__codexDesktopProviders.restorePickerEfforts("))
+    selectorSource = source;
 });
 assert.ok(filterSource);
 const visible = Function(
@@ -121,6 +142,36 @@ assert.equal(
   true,
 );
 assert.equal(visible({ ...options, model: list.data[1] }), true);
+assert.ok(selectorSource);
+const select = Function(
+  "__codexDesktopProviders",
+  filterName,
+  "Ste",
+  `return (${selectorSource})`,
+)(runtime, visible, () => true);
+const native = {
+  ...list.data[0],
+  supportedReasoningEfforts: [
+    { reasoningEffort: "low" },
+    { reasoningEffort: "high" },
+  ],
+};
+const selection = select({
+  ...options,
+  availableModels: new Set(["gpt"]),
+  models: [native, list.data[1]],
+  enabledReasoningEfforts: new Set(["high"]),
+  includeUltraReasoningEffort: false,
+});
+assert.deepEqual(selection.models[0].supportedReasoningEfforts, [
+  { reasoningEffort: "high" },
+]);
+assert.deepEqual(
+  selection.models[1].supportedReasoningEfforts.map(
+    (entry) => entry.reasoningEffort,
+  ),
+  ["low", "medium", "high"],
+);
 console.log(
   `PASS ${version}: actual model filter, native entitlement filtering, model listing, direct routing, prewarm and default selection`,
 );

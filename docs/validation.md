@@ -50,6 +50,12 @@ and streamed completion. It also confirms that the global provider remains
 OpenAI. The test does not use account credentials or external inference. It
 passed using the backend bundled with the supported desktop release.
 
+Version 0.2 also verifies that the actual patched model/effort selector preserves
+all declared custom choices even when native account settings enable only high,
+while native model filtering stays intact. The native backend test runs two turns
+with low and medium respectively (including collaboration mode), and checks the
+actual upstream `reasoning.effort` values rather than just picker metadata.
+
 ## Live provider verification
 
 A separate isolated ephemeral native-backend check successfully completed a
