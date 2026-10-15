@@ -27,6 +27,7 @@ Register a model using a native Codex profile:
 ```toml
 [profiles.openrouter-glm-5-3-flash]
 model = "z-ai/glm-5.3-flash"
+model_name = "GLM 5.3 Flash"
 model_provider = "openrouter"
 model_reasoning_effort = "high"
 model_context_window = 1048576
@@ -39,8 +40,38 @@ both fields, and profiles using `openai`, do not add entries. Keep the global
 default. No global custom model catalog is required.
 
 Restart the patched desktop after registration. Start a **new local Codex chat**
-and select `z-ai/glm-5.3-flash (OpenRouter)`. Official model entries retain their
+and select `GLM 5.3 Flash (OpenRouter)`. Official model entries retain their
 native availability checks and use your existing ChatGPT login.
+
+## Configure model display names
+
+Set `model_name` on a model's main profile to give it a readable label:
+
+```toml
+[profiles.ollama-glm-5-3-flash]
+model = "glm-5.3-flash"
+model_name = "GLM 5.3 Flash"
+model_provider = "ollama-cloud"
+model_reasoning_effort = "high"
+```
+
+The menu shows `GLM 5.3 Flash (Ollama Cloud)`; the OpenRouter profile above shows
+`GLM 5.3 Flash (OpenRouter)`. The provider suffix distinguishes the two routes.
+`model` remains the exact upstream ID for requests, history, defaults, and
+provider matching. Names are presentation metadata and never enter inference
+configuration or request model IDs. Native OpenAI names are left unchanged.
+
+The name is shared across all effort variants for the same model/provider. Set
+it once on the main profile; repeating the same name is allowed, but conflicting
+names are rejected. Leading/trailing whitespace is trimmed, and non-string or
+blank names are rejected. Omitting `model_name` retains the model-ID fallback
+used by earlier versions.
+
+`model_name` is a **desktop patch extension**, not a native Codex inference key.
+The normalized native config omits it, so the patch reads only this display field
+from enabled, non-project raw config layers in native precedence order. Native
+Codex may log that it ignores this extension key; the patched desktop consumes
+it independently. The unpatched CLI continues to use the underlying model ID.
 
 ## Configure selectable reasoning effort
 

@@ -7,7 +7,7 @@
 
 buildNpmPackage {
   pname = "codex-desktop-providers";
-  version = "0.2.0";
+  version = "0.3.0";
   nodejs = nodejs_24;
 
   src = lib.cleanSourceWith {
@@ -23,7 +23,7 @@ buildNpmPackage {
       ]);
   };
 
-  npmDepsHash = "sha256-sBABbF38tUU3A5uyOR/HiaJE8Ooz7snfF8A7nEs8mvg=";
+  npmDepsHash = "sha256-hQ3cmoVpNEh6q/EFwyK6dOBhiGEV67YdqaH7sIoZ0YA=";
   npmBuildScript = "build";
 
   doCheck = true;

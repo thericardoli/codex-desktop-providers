@@ -44,6 +44,12 @@ client.dispatchMessage = () => {};
 const model = "z-ai/glm-5.3-flash";
 const calls = [];
 client.sendConfigReadRequest = async () => ({
+  layers: [
+    {
+      name: { type: "user" },
+      config: { profiles: { glm: { model_name: "GLM 5.3 Flash" } } },
+    },
+  ],
   config: {
     model_providers: {
       openrouter: { name: "OpenRouter", wire_api: "responses" },
@@ -87,6 +93,8 @@ const list = await client.sendRequest("model/list", {}, {});
 assert.equal(list.data.length, 2);
 assert.equal(list.data[0].model, "gpt");
 assert.equal(list.data[1].model, model);
+assert.equal(list.data[1].id, model);
+assert.equal(list.data[1].displayName, "GLM 5.3 Flash (OpenRouter)");
 assert.deepEqual(
   list.data[1].supportedReasoningEfforts.map((entry) => entry.reasoningEffort),
   ["low", "high", "max"],
@@ -163,6 +171,8 @@ const selection = select({
   enabledReasoningEfforts: new Set(["high"]),
   includeUltraReasoningEffort: false,
 });
+assert.equal(selection.models[1].displayName, "GLM 5.3 Flash (OpenRouter)");
+assert.equal(selection.models[1].model, model);
 assert.deepEqual(selection.models[0].supportedReasoningEfforts, [
   { reasoningEffort: "high" },
 ]);

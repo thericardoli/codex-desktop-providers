@@ -23,7 +23,7 @@ async function registry(client: RequestClient): Promise<Registry> {
   const pending = (async () => {
     const result = object(
       await client.sendRequest("config/read", {
-        includeLayers: false,
+        includeLayers: true,
         cwd: null,
       }),
     );
@@ -31,7 +31,7 @@ async function registry(client: RequestClient): Promise<Registry> {
     if (!config)
       throw new Error("[desktop-providers] config/read returned no config");
     return {
-      models: readProfiles(config),
+      models: readProfiles(config, result?.layers),
       threads: previous ? (await previous).threads : new Map<string, string>(),
       selections: previous
         ? (await previous).selections

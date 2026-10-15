@@ -5,6 +5,15 @@
 - Correct the GLM-5.3-Flash preset to low/high/max, retaining high as the configured
   default, and distinguish API acceptance from native model capability.
 
+## 0.3.0
+
+- Add optional profile `model_name` for readable model-menu labels, retaining a
+  provider suffix to distinguish identical names on different routes.
+- Recover display metadata from native raw config layers while preserving
+  effective provider/auth configuration and upstream model IDs.
+- Validate names and shared effort-variant metadata; retain backward-compatible
+  model-ID labels when no name is configured.
+
 ## 0.2.0
 
 - Merge same-model/provider native profiles into selectable reasoning strengths.

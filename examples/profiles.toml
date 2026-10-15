@@ -4,6 +4,7 @@
 
 [profiles.openrouter-glm-5-3-flash]
 model = "z-ai/glm-5.3-flash"
+model_name = "GLM 5.3 Flash"
 model_provider = "openrouter"
 model_reasoning_effort = "high"
 model_context_window = 1048576

@@ -96,6 +96,7 @@ wire_api = "responses"
 env_key = "DESKTOP_PROVIDERS_SMOKE_KEY"
 [profiles.smoke]
 model = "${model}"
+model_name = "GLM 5.3 Flash"
 model_provider = "smoke"
 model_reasoning_effort = "high"
 [profiles.smoke-low]
@@ -161,6 +162,13 @@ try {
   child.stdin.write(
     JSON.stringify({ method: "initialized", params: {} }) + "\n",
   );
+  const catalog = await client.sendRequest("model/list", {
+    includeHidden: true,
+    limit: 100,
+  });
+  const named = catalog.data.find((entry) => entry.model === model);
+  assert.equal(named?.displayName, "GLM 5.3 Flash (Local smoke upstream)");
+  assert.equal(named?.id, model);
   await writeDefault(client, model, "low", async () => {
     throw Error("Global model default must not be written");
   });
@@ -212,8 +220,14 @@ try {
     assert.equal(completed.params.turn.status, "completed");
   }
   assert.equal(received.length, 2);
-  const config = await raw("config/read", { includeLayers: false, cwd: null });
+  const config = await raw("config/read", { includeLayers: true, cwd: null });
   assert.equal(config.config.model_provider ?? "openai", "openai");
+  assert.equal(config.config.profiles.smoke.model_name, undefined);
+  assert.equal(
+    config.layers.find((layer) => layer.name.type === "user").config.profiles
+      .smoke.model_name,
+    "GLM 5.3 Flash",
+  );
   console.log(
     "PASS native app-server: registered profile → thread provider → direct authenticated Responses request → streamed completion; global provider remains OpenAI",
   );

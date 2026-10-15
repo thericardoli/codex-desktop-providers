@@ -25,10 +25,49 @@ const EFFORT_ORDER = [
 ] as const;
 const EFFORTS = new Set<string>(EFFORT_ORDER);
 
-export function readProfiles(config: JsonObject): Map<string, RegisteredModel> {
+/** Native config normalization drops extension metadata. Layers arrive in
+ * highest-precedence-first order; only enabled, non-project layers can supply
+ * names. Routing and authentication still come from native effective config. */
+function profileNames(layers: unknown): Map<string, unknown> {
+  const names = new Map<string, unknown>();
+  if (!Array.isArray(layers)) return names;
+  for (const value of layers) {
+    const layer = object(value);
+    if (
+      !layer ||
+      layer.disabledReason != null ||
+      object(layer.name)?.type === "project"
+    )
+      continue;
+    const profiles = object(object(layer.config)?.profiles) ?? {};
+    for (const [name, value] of Object.entries(profiles)) {
+      const profile = object(value);
+      if (profile && Object.hasOwn(profile, "model_name") && !names.has(name)) {
+        names.set(name, profile.model_name);
+      }
+    }
+  }
+  return names;
+}
+
+function modelName(value: unknown, profile: string): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(
+      `[desktop-providers] model_name in profile ${profile} must be a non-empty string`,
+    );
+  }
+  return value.trim();
+}
+
+export function readProfiles(
+  config: JsonObject,
+  layers?: unknown,
+): Map<string, RegisteredModel> {
   const providers = object(config.model_providers) ?? {};
   const profiles = object(config.profiles) ?? {};
   const models = new Map<string, RegisteredModel>();
+  const names = profileNames(layers);
 
   for (const [name, value] of Object.entries(profiles).sort()) {
     const profile = object(value);
@@ -55,6 +94,7 @@ export function readProfiles(config: JsonObject): Map<string, RegisteredModel> {
     if (!model) {
       throw new Error(`[desktop-providers] Profile ${name} has an empty model`);
     }
+    const displayName = modelName(profile.model_name ?? names.get(name), name);
     const effort = profile.model_reasoning_effort ?? "medium";
     if (typeof effort !== "string" || !EFFORTS.has(effort)) {
       throw new Error(
@@ -76,6 +116,17 @@ export function readProfiles(config: JsonObject): Map<string, RegisteredModel> {
           `[desktop-providers] Model ${model} occurs on multiple providers; its routing would be ambiguous`,
         );
       }
+      if (displayName !== undefined) {
+        if (
+          previous.modelName !== undefined &&
+          previous.modelName !== displayName
+        ) {
+          throw new Error(
+            `[desktop-providers] Conflicting model_name for ${model} in profiles ${previous.profile} and ${name}`,
+          );
+        }
+        previous.modelName = displayName;
+      }
       for (const [key, value] of Object.entries(tuning)) {
         if (key === "model_reasoning_effort") continue;
         if (
@@ -96,6 +147,7 @@ export function readProfiles(config: JsonObject): Map<string, RegisteredModel> {
     models.set(model, {
       profile: name,
       model,
+      ...(displayName === undefined ? {} : { modelName: displayName }),
       provider: profile.model_provider,
       providerName:
         typeof provider.name === "string"
@@ -136,8 +188,8 @@ export function appendModels(
     return {
       id: entry.model,
       model: entry.model,
-      displayName: `${entry.model} (${entry.providerName})`,
-      description: `Direct connection via ${entry.provider}; profile: ${entry.profile}`,
+      displayName: `${entry.modelName ?? entry.model} (${entry.providerName})`,
+      description: `${entry.modelName ?? entry.model} via ${entry.providerName}`,
       hidden: false,
       isDefault: false,
       supportsPersonality: false,

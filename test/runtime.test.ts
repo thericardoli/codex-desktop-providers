@@ -45,7 +45,7 @@ const config = () => ({
   },
 });
 
-function fixture(hostId = "local") {
+function fixture(hostId = "local", layers?: unknown) {
   const calls: {
     method: string;
     params: JsonObject | null | undefined;
@@ -69,7 +69,7 @@ function fixture(hostId = "local") {
         options,
         async (method, params, options) => {
           calls.push({ method, params, options });
-          if (method === "config/read") return { config: config() };
+          if (method === "config/read") return { config: config(), layers };
           if (method === "model/list")
             return { data: [nativeModel], nextCursor: null };
           if (method === "thread/start") {
@@ -115,6 +115,122 @@ test("register native profiles without copying provider auth or security setting
   assert.equal(
     JSON.stringify([...entries]).includes("developer_instructions"),
     false,
+  );
+});
+
+test("use a configured display name without changing inference IDs or tuning", async () => {
+  const layers = [
+    {
+      name: { type: "user" },
+      config: { profiles: { glm: { model_name: " GLM 5.3 Flash " } } },
+    },
+  ];
+  const { client, calls, nativeModel } = fixture("local", layers);
+  const result = object(await client.sendRequest("model/list", {}))!;
+  const models = result.data as JsonObject[];
+  assert.equal(models[0], nativeModel);
+  assert.equal(models[1]?.displayName, "GLM 5.3 Flash (OpenRouter)");
+  assert.equal(models[1]?.description, "GLM 5.3 Flash via OpenRouter");
+  assert.equal(models[1]?.id, MODEL);
+  assert.equal(models[1]?.model, MODEL);
+  assert.equal(
+    calls.find((call) => call.method === "config/read")?.params?.includeLayers,
+    true,
+  );
+  await client.sendRequest("thread/start", { model: MODEL });
+  const request = calls.at(-1)?.params!;
+  assert.equal(request.model, MODEL);
+  assert.equal(request.modelProvider, "openrouter");
+  assert.equal(Object.hasOwn(object(request.config)!, "model_name"), false);
+});
+
+test("read display metadata from enabled config layers in native priority order", () => {
+  const layer = (type: string, label: string, disabledReason?: string) => ({
+    name: { type },
+    config: {
+      profiles: {
+        glm: {
+          model_name: label,
+          model: "must-not-override-native-id",
+          model_provider: "must-not-override-native-provider",
+        },
+      },
+    },
+    disabledReason,
+  });
+  const layers = [
+    layer("project", "Untrusted project name"),
+    layer("user", "Disabled name", "disabled"),
+    layer("sessionFlags", "CLI 模型名称"),
+    layer("user", "User name"),
+    layer("system", "System name"),
+  ];
+  const entry = readProfiles(config(), layers).get(MODEL)!;
+  assert.equal(entry.modelName, "CLI 模型名称");
+  assert.equal(entry.model, MODEL);
+  assert.equal(entry.provider, "openrouter");
+  assert.equal(
+    readProfiles(config(), [layer("project", "Ignored")]).get(MODEL)?.modelName,
+    undefined,
+  );
+});
+
+test("share one display name across effort variants and reject conflicting names", () => {
+  const base = config();
+  const named = {
+    ...base,
+    profiles: {
+      ...base.profiles,
+      glm: { ...base.profiles.glm, model_name: "GLM 5.3 Flash" },
+    },
+  };
+  const entry = readProfiles(named).get(MODEL)!;
+  assert.equal(entry.modelName, "GLM 5.3 Flash");
+  assert.deepEqual(entry.efforts, ["low", "high", "max"]);
+  assert.throws(
+    () =>
+      readProfiles({
+        ...named,
+        profiles: {
+          ...named.profiles,
+          "glm-low": {
+            ...base.profiles["glm-low"],
+            model_name: "Another name",
+          },
+        },
+      }),
+    /Conflicting model_name/,
+  );
+  assert.equal(
+    readProfiles({
+      ...base,
+      profiles: {
+        ...base.profiles,
+        "glm-low": {
+          ...base.profiles["glm-low"],
+          model_name: "Inherited name",
+        },
+      },
+    }).get(MODEL)?.modelName,
+    "Inherited name",
+  );
+});
+
+test("reject invalid model names and keep model-id fallback for unnamed entries", () => {
+  for (const model_name of ["", "   ", 123, {}, []]) {
+    assert.throws(
+      () =>
+        readProfiles({
+          ...config(),
+          profiles: { glm: { ...config().profiles.glm, model_name } },
+        }),
+      /non-empty string/,
+    );
+  }
+  const result = appendModels({ data: [] }, readProfiles(config()));
+  assert.equal(
+    (result.data as JsonObject[])[0]?.displayName,
+    `${MODEL} (OpenRouter)`,
   );
 });
 

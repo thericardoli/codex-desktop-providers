@@ -19,6 +19,12 @@ provider parameters, prewarming, follow-up/resume provider checks, remote-host
 exclusion, global-default preservation, exact adapter matching, and ASAR metadata
 and integrity preservation.
 
+Version 0.3 adds display-name validation, native layer precedence, disabled and
+project-layer exclusion, shared effort-variant names, and preservation of raw
+inference IDs. The native-backend smoke uses a real `model_name` TOML field,
+confirms native normalization drops it, and verifies the patched model list
+recovers its label while the upstream still receives the unchanged model ID.
+
 ## Actual application assets
 
 Work with a disposable archive, retaining the original application untouched:

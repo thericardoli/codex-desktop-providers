@@ -7,7 +7,7 @@ and no HTTP client. There is no daemon or inference proxy to run.
 ## Data flow
 
 1. The native renderer request client receives `model/list`.
-2. The runtime reads the effective native config with `config/read`. It retains
+2. The runtime reads the effective native config and raw layers with `config/read`. It retains
    only registered model metadata and model tuning, not provider credentials.
 3. Native models are left intact and explicit third-party profiles are appended.
    Only those tagged additions bypass the desktop's official catalog filter.
@@ -61,6 +61,14 @@ with `thread/read`. The runtime does not persist its own routing database.
 The desktop's own temporary model override holds third-party default selection.
 This prevents UI selection from writing a third-party ID into the global OpenAI
 configuration used by CLI and background tasks.
+
+Optional `model_name` is read from the effective profile when present or from
+enabled, non-project raw layers (highest precedence first). Native config
+normalization drops this extension field. Only the label is recovered from raw
+layers; routing and authentication still use native effective configuration.
+One label is shared by all effort variants, and conflicting labels fail clearly.
+Only the menu's `displayName` changes; the `id`, `model`, thread parameters,
+history identity and provider mapping remain the upstream ID.
 
 Profiles for the same model/provider aggregate reasoning strengths in canonical
 order. The alphabetically first profile supplies the default; conflicting shared
