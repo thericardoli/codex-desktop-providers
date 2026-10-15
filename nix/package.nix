@@ -33,6 +33,10 @@ buildNpmPackage {
     runHook postCheck
   '';
 
+  postInstall = ''
+    node "$out/lib/node_modules/codex-desktop-providers/dist/cli.js" --help > /dev/null
+  '';
+
   meta = {
     description = "Version-checked direct-provider model support for Codex Desktop";
     license = lib.licenses.mit;
