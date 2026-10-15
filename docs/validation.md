@@ -20,7 +20,7 @@ exclusion, global-default preservation, exact adapter matching, and ASAR metadat
 and integrity preservation.
 
 Version 0.3 adds display-name validation, native layer precedence, disabled and
-project-layer exclusion, shared effort-variant names, and preservation of raw
+project-layer exclusion, display metadata, and preservation of raw
 inference IDs. The native-backend smoke uses a real `model_name` TOML field,
 confirms native normalization drops it, and verifies the patched model list
 recovers its label while the upstream still receives the unchanged model ID.
@@ -87,3 +87,14 @@ Earlier low/medium live calls established transport acceptance only: the native
 model template treats unrecognized values such as `medium` as `max`. They did
 not establish a separate medium reasoning level. The current backend and
 upstream-asset checks exercise the corrected preset, including explicit `max`.
+
+## Single-profile effort lists
+
+Version 0.4 requires one profile with `model_reasoning_efforts = ["low", "high",
+"max"]` and a native scalar default such as `model_reasoning_effort = "high"`.
+The native backend smoke verifies this exact TOML shape, including raw-list
+recovery and actual low/max scalar request values. Unit tests reject empty,
+invalid, duplicate or missing lists, defaults outside the list, and repeated model
+profiles. A separate native-loader probe confirmed that assigning a list to the
+singular enum key fails configuration loading; using the plural extension keeps
+the native configuration valid.

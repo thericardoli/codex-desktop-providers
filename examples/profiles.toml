@@ -7,16 +7,5 @@ model = "z-ai/glm-5.3-flash"
 model_name = "GLM 5.3 Flash"
 model_provider = "openrouter"
 model_reasoning_effort = "high"
+model_reasoning_efforts = ["low", "high", "max"]
 model_context_window = 1048576
-
-# Same model/provider: additional profiles add selectable reasoning strengths.
-# The alphabetically first profile above remains the default (high).
-[profiles.openrouter-glm-5-3-flash-low]
-model = "z-ai/glm-5.3-flash"
-model_provider = "openrouter"
-model_reasoning_effort = "low"
-
-[profiles.openrouter-glm-5-3-flash-max]
-model = "z-ai/glm-5.3-flash"
-model_provider = "openrouter"
-model_reasoning_effort = "max"

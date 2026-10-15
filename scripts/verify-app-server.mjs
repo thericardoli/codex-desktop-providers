@@ -97,16 +97,9 @@ env_key = "DESKTOP_PROVIDERS_SMOKE_KEY"
 [profiles.smoke]
 model = "${model}"
 model_name = "GLM 5.3 Flash"
+model_reasoning_efforts = ["low", "high", "max"]
 model_provider = "smoke"
 model_reasoning_effort = "high"
-[profiles.smoke-low]
-model = "${model}"
-model_provider = "smoke"
-model_reasoning_effort = "low"
-[profiles.smoke-max]
-model = "${model}"
-model_provider = "smoke"
-model_reasoning_effort = "max"
 `,
   { mode: 0o600 },
 );

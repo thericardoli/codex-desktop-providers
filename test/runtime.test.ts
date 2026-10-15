@@ -28,19 +28,10 @@ const config = () => ({
       model: MODEL,
       model_provider: "openrouter",
       model_reasoning_effort: "high",
+      model_reasoning_efforts: ["low", "high", "max"],
       model_context_window: 1048576,
       approval_policy: "never",
       developer_instructions: "must not be copied",
-    },
-    "glm-low": {
-      model: MODEL,
-      model_provider: "openrouter",
-      model_reasoning_effort: "low",
-    },
-    "glm-max": {
-      model: MODEL,
-      model_provider: "openrouter",
-      model_reasoning_effort: "max",
     },
   },
 });
@@ -175,44 +166,18 @@ test("read display metadata from enabled config layers in native priority order"
   );
 });
 
-test("share one display name across effort variants and reject conflicting names", () => {
+test("reject multiple profiles for the same model instead of merging legacy variants", () => {
   const base = config();
-  const named = {
-    ...base,
-    profiles: {
-      ...base.profiles,
-      glm: { ...base.profiles.glm, model_name: "GLM 5.3 Flash" },
-    },
-  };
-  const entry = readProfiles(named).get(MODEL)!;
-  assert.equal(entry.modelName, "GLM 5.3 Flash");
-  assert.deepEqual(entry.efforts, ["low", "high", "max"]);
   assert.throws(
     () =>
       readProfiles({
-        ...named,
+        ...base,
         profiles: {
-          ...named.profiles,
-          "glm-low": {
-            ...base.profiles["glm-low"],
-            model_name: "Another name",
-          },
+          ...base.profiles,
+          duplicate: { ...base.profiles.glm, model_reasoning_effort: "low" },
         },
       }),
-    /Conflicting model_name/,
-  );
-  assert.equal(
-    readProfiles({
-      ...base,
-      profiles: {
-        ...base.profiles,
-        "glm-low": {
-          ...base.profiles["glm-low"],
-          model_name: "Inherited name",
-        },
-      },
-    }).get(MODEL)?.modelName,
-    "Inherited name",
+    /one profile per model/,
   );
 });
 
@@ -272,7 +237,7 @@ test("reject undefined, incompatible, ambiguous and invalid-effort registrations
           duplicate: { ...config().profiles.glm, model_provider: "other" },
         },
       }),
-    /multiple providers/,
+    /one profile per model/,
   );
   assert.throws(
     () =>
@@ -282,7 +247,7 @@ test("reject undefined, incompatible, ambiguous and invalid-effort registrations
           glm: { ...config().profiles.glm, model_reasoning_effort: "invented" },
         },
       }),
-    /Invalid reasoning effort/,
+    /must be included/,
   );
 });
 
@@ -440,32 +405,78 @@ test("custom default selection does not write global model/provider or credentia
   assert.equal(writes, 1);
 });
 
-test("merge effort profiles into one ordered model and retain the primary default", () => {
-  const entries = readProfiles(config());
-  assert.equal(entries.size, 1);
-  assert.equal(entries.get(MODEL)?.effort, "high");
-  assert.deepEqual(entries.get(MODEL)?.efforts, ["low", "high", "max"]);
-  const catalog = appendModels({ data: [] }, entries).data as JsonObject[];
-  assert.deepEqual(
-    catalog[0]?.supportedReasoningEfforts,
-    ["low", "high", "max"].map((reasoningEffort) => ({
-      reasoningEffort,
-      description: `${reasoningEffort} effort`,
-    })),
-  );
+test("read one explicit effort list with canonical order and a declared default", () => {
+  const entry = readProfiles(config()).get(MODEL)!;
+  assert.equal(entry.effort, "high");
+  assert.deepEqual(entry.efforts, ["low", "high", "max"]);
+  const base = config();
+  const firstDefault = readProfiles({
+    ...base,
+    profiles: {
+      glm: {
+        ...base.profiles.glm,
+        model_reasoning_effort: null,
+        model_reasoning_efforts: ["max", "low", "high"],
+      },
+    },
+  }).get(MODEL)!;
+  assert.equal(firstDefault.effort, "max");
+  assert.deepEqual(firstDefault.efforts, ["low", "high", "max"]);
+});
+
+test("require valid nonempty lists and reject legacy scalar-only registrations", () => {
+  const base = config();
+  for (const model_reasoning_efforts of [
+    undefined,
+    null,
+    [],
+    "high",
+    ["high", 123],
+    ["invented"],
+    ["high", "high"],
+  ]) {
+    assert.throws(
+      () =>
+        readProfiles({
+          ...base,
+          profiles: { glm: { ...base.profiles.glm, model_reasoning_efforts } },
+        }),
+      /model_reasoning_efforts/,
+    );
+  }
   assert.throws(
     () =>
       readProfiles({
-        ...config(),
+        ...base,
         profiles: {
-          ...config().profiles,
-          "glm-low": {
-            ...config().profiles["glm-low"],
-            model_context_window: 128000,
-          },
+          glm: { ...base.profiles.glm, model_reasoning_effort: "medium" },
         },
       }),
-    /Conflicting model_context_window/,
+    /must be included/,
+  );
+});
+
+test("read list metadata from enabled native layers without copying it into inference config", () => {
+  const base = config();
+  const { model_reasoning_efforts: removed, ...profile } = base.profiles.glm;
+  void removed;
+  const effective = { ...base, profiles: { glm: profile } };
+  const layer = (type: string, efforts: unknown, disabledReason?: string) => ({
+    name: { type },
+    disabledReason,
+    config: { profiles: { glm: { model_reasoning_efforts: efforts } } },
+  });
+  const entry = readProfiles(effective, [
+    layer("project", ["ultra"]),
+    layer("user", ["none"], "disabled"),
+    layer("sessionFlags", ["low", "high", "max"]),
+    layer("user", ["high"]),
+  ]).get(MODEL)!;
+  assert.deepEqual(entry.efforts, ["low", "high", "max"]);
+  assert.equal(Object.hasOwn(entry.config, "model_reasoning_efforts"), false);
+  assert.throws(
+    () => readProfiles(effective, [layer("project", ["high"])]),
+    /non-empty list/,
   );
 });
 

@@ -62,16 +62,18 @@ The desktop's own temporary model override holds third-party default selection.
 This prevents UI selection from writing a third-party ID into the global OpenAI
 configuration used by CLI and background tasks.
 
-Optional `model_name` is read from the effective profile when present or from
+`model_name` and required `model_reasoning_efforts` are read from the effective profile when present or from
 enabled, non-project raw layers (highest precedence first). Native config
-normalization drops this extension field. Only the label is recovered from raw
-layers; routing and authentication still use native effective configuration.
-One label is shared by all effort variants, and conflicting labels fail clearly.
+normalization drops these extension fields. Only presentation/capability metadata
+is recovered from raw layers; routing/auth still use native effective config.
+Each model has one profile; repeated model registrations fail clearly.
 Only the menu's `displayName` changes; the `id`, `model`, thread parameters,
 history identity and provider mapping remain the upstream ID.
 
-Profiles for the same model/provider aggregate reasoning strengths in canonical
-order. The alphabetically first profile supplies the default; conflicting shared
-tuning is rejected. Explicit request effort takes precedence over in-memory
-selection, then the profile default. Missing effort on follow-ups/resume is left
-to native per-chat persistence, so changing to low is not undone by the next turn.
+Each profile declares a nonempty, duplicate-free list of reasoning efforts. The
+native singular `model_reasoning_effort` supplies its default, or the first list
+item is used if no default is configured. Only selected scalar effort is forwarded
+to inference. Explicit request effort takes precedence over in-memory selection,
+then the profile default. Missing effort on follow-ups/resume is left to native
+per-chat persistence, so changing to low is not undone by the next turn. No legacy
+multi-profile merging or scalar-only compatibility path remains.

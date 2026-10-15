@@ -5,6 +5,13 @@
 - Correct the GLM-5.3-Flash preset to low/high/max, retaining high as the configured
   default, and distinguish API acceptance from native model capability.
 
+## 0.4.0
+
+- Require one model profile with a `model_reasoning_efforts` list and a native
+  scalar default; validate list contents and default membership.
+- Remove multi-profile effort aggregation and scalar-only compatibility.
+- Keep the native singular effort key scalar so CLI and app-server config loads.
+
 ## 0.3.0
 
 - Add optional profile `model_name` for readable model-menu labels, retaining a

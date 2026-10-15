@@ -30,6 +30,7 @@ model = "z-ai/glm-5.3-flash"
 model_name = "GLM 5.3 Flash"
 model_provider = "openrouter"
 model_reasoning_effort = "high"
+model_reasoning_efforts = ["low", "high", "max"]
 model_context_window = 1048576
 ```
 
@@ -53,6 +54,7 @@ model = "glm-5.3-flash"
 model_name = "GLM 5.3 Flash"
 model_provider = "ollama-cloud"
 model_reasoning_effort = "high"
+model_reasoning_efforts = ["low", "high", "max"]
 ```
 
 The menu shows `GLM 5.3 Flash (Ollama Cloud)`; the OpenRouter profile above shows
@@ -61,42 +63,41 @@ The menu shows `GLM 5.3 Flash (Ollama Cloud)`; the OpenRouter profile above show
 provider matching. Names are presentation metadata and never enter inference
 configuration or request model IDs. Native OpenAI names are left unchanged.
 
-The name is shared across all effort variants for the same model/provider. Set
-it once on the main profile; repeating the same name is allowed, but conflicting
-names are rejected. Leading/trailing whitespace is trimmed, and non-string or
-blank names are rejected. Omitting `model_name` retains the model-ID fallback
-used by earlier versions.
+Each model has one profile and one display name. Leading/trailing whitespace is
+trimmed, and non-string or blank names are rejected. Omitting `model_name`
+displays the upstream model ID.
 
 `model_name` is a **desktop patch extension**, not a native Codex inference key.
-The normalized native config omits it, so the patch reads only this display field
+The normalized native config omits it, so the patch reads this display field and the effort list
 from enabled, non-project raw config layers in native precedence order. Native
 Codex may log that it ignores this extension key; the patched desktop consumes
 it independently. The unpatched CLI continues to use the underlying model ID.
 
 ## Configure selectable reasoning effort
 
-Profiles with the **same model and provider** merge into one model menu entry.
-Each profile's `model_reasoning_effort` adds a selectable strength. For example,
-keep the main profile above as the default and add:
+Use **one profile per model**. Declare its selectable strengths as a list:
 
 ```toml
-[profiles.openrouter-glm-5-3-flash-low]
-model = "z-ai/glm-5.3-flash"
-model_provider = "openrouter"
-model_reasoning_effort = "low"
-
-[profiles.openrouter-glm-5-3-flash-max]
-model = "z-ai/glm-5.3-flash"
-model_provider = "openrouter"
-model_reasoning_effort = "max"
+[profiles.ollama-glm-5-3-flash]
+model = "glm-5.3-flash"
+model_name = "GLM 5.3 Flash"
+model_provider = "ollama-cloud"
+model_reasoning_efforts = ["low", "high", "max"]
+model_reasoning_effort = "high"
 ```
 
-This exposes **low / high / max**, with **high** as the default. The
-alphabetically first profile for a model determines its default; the unsuffixed
-main profile sorts before its `-low` and `-max` variants. Effort options are
-deduplicated and ordered by strength. Other overlapping model-tuning values must
-agree; variant profiles may omit shared tuning such as context-window size.
-Removing an effort profile removes that choice after config reload/restart.
+- `model_reasoning_efforts` (plural) is required and declares the supported list.
+- `model_reasoning_effort` (singular) is the native default. It must occur in the
+  list. If omitted, the patch uses the first declared list item for new chats.
+- The list must be nonempty, contain recognized effort names, and have no
+  duplicates. The menu orders them by strength.
+- Register only one profile for each model ID. Old multi-profile effort variants
+  and scalar-only registrations are rejected; there is no compatibility shim.
+
+The native singular key accepts one enum value. Assigning an array to it prevents
+native Codex from loading the whole configuration. The plural list is a patch
+extension read from enabled raw config layers, just like `model_name`. It is not
+forwarded to inference: the selected effort is sent as one native scalar value.
 
 Select the strength using the existing desktop reasoning/power selector. The
 patch retains declared third-party choices through native model-list filtering,

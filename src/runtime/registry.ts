@@ -27,10 +27,10 @@ const EFFORTS = new Set<string>(EFFORT_ORDER);
 
 /** Native config normalization drops extension metadata. Layers arrive in
  * highest-precedence-first order; only enabled, non-project layers can supply
- * names. Routing and authentication still come from native effective config. */
-function profileNames(layers: unknown): Map<string, unknown> {
-  const names = new Map<string, unknown>();
-  if (!Array.isArray(layers)) return names;
+ * metadata. Routing/auth still come from native effective config. */
+function profileMetadata(layers: unknown): Map<string, JsonObject> {
+  const metadata = new Map<string, JsonObject>();
+  if (!Array.isArray(layers)) return metadata;
   for (const value of layers) {
     const layer = object(value);
     if (
@@ -42,12 +42,35 @@ function profileNames(layers: unknown): Map<string, unknown> {
     const profiles = object(object(layer.config)?.profiles) ?? {};
     for (const [name, value] of Object.entries(profiles)) {
       const profile = object(value);
-      if (profile && Object.hasOwn(profile, "model_name") && !names.has(name)) {
-        names.set(name, profile.model_name);
+      if (!profile) continue;
+      const entry = metadata.get(name) ?? {};
+      for (const key of ["model_name", "model_reasoning_efforts"]) {
+        if (Object.hasOwn(profile, key) && !Object.hasOwn(entry, key)) {
+          entry[key] = profile[key];
+        }
       }
+      metadata.set(name, entry);
     }
   }
-  return names;
+  return metadata;
+}
+
+function reasoningEfforts(value: unknown, profile: string): string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.some((effort) => typeof effort !== "string" || !EFFORTS.has(effort))
+  ) {
+    throw new Error(
+      `[desktop-providers] model_reasoning_efforts in profile ${profile} must be a non-empty list of supported effort names`,
+    );
+  }
+  if (new Set(value).size !== value.length) {
+    throw new Error(
+      `[desktop-providers] Duplicate model_reasoning_efforts in profile ${profile}`,
+    );
+  }
+  return value as string[];
 }
 
 function modelName(value: unknown, profile: string): string | undefined {
@@ -67,7 +90,7 @@ export function readProfiles(
   const providers = object(config.model_providers) ?? {};
   const profiles = object(config.profiles) ?? {};
   const models = new Map<string, RegisteredModel>();
-  const names = profileNames(layers);
+  const metadata = profileMetadata(layers);
 
   for (const [name, value] of Object.entries(profiles).sort()) {
     const profile = object(value);
@@ -94,11 +117,24 @@ export function readProfiles(
     if (!model) {
       throw new Error(`[desktop-providers] Profile ${name} has an empty model`);
     }
-    const displayName = modelName(profile.model_name ?? names.get(name), name);
-    const effort = profile.model_reasoning_effort ?? "medium";
-    if (typeof effort !== "string" || !EFFORTS.has(effort)) {
+    if (models.has(model)) {
       throw new Error(
-        `[desktop-providers] Invalid reasoning effort in ${name}`,
+        `[desktop-providers] Model ${model} is registered by multiple profiles; declare one profile per model with model_reasoning_efforts`,
+      );
+    }
+    const extra = metadata.get(name);
+    const displayName = modelName(
+      profile.model_name ?? extra?.model_name,
+      name,
+    );
+    const declared = reasoningEfforts(
+      profile.model_reasoning_efforts ?? extra?.model_reasoning_efforts,
+      name,
+    );
+    const effort = profile.model_reasoning_effort ?? declared[0];
+    if (typeof effort !== "string" || !declared.includes(effort)) {
+      throw new Error(
+        `[desktop-providers] Default model_reasoning_effort in profile ${name} must be included in model_reasoning_efforts`,
       );
     }
     const tuning: JsonObject = {};
@@ -109,41 +145,6 @@ export function readProfiles(
     }
     // Never inherit an official model's ultra effort when starting this model.
     tuning.model_reasoning_effort = effort;
-    const previous = models.get(model);
-    if (previous) {
-      if (previous.provider !== profile.model_provider) {
-        throw new Error(
-          `[desktop-providers] Model ${model} occurs on multiple providers; its routing would be ambiguous`,
-        );
-      }
-      if (displayName !== undefined) {
-        if (
-          previous.modelName !== undefined &&
-          previous.modelName !== displayName
-        ) {
-          throw new Error(
-            `[desktop-providers] Conflicting model_name for ${model} in profiles ${previous.profile} and ${name}`,
-          );
-        }
-        previous.modelName = displayName;
-      }
-      for (const [key, value] of Object.entries(tuning)) {
-        if (key === "model_reasoning_effort") continue;
-        if (
-          previous.config[key] !== undefined &&
-          previous.config[key] !== value
-        ) {
-          throw new Error(
-            `[desktop-providers] Conflicting ${key} for ${model} in profiles ${previous.profile} and ${name}`,
-          );
-        }
-        previous.config[key] = value;
-      }
-      previous.efforts = EFFORT_ORDER.filter(
-        (value) => value === effort || previous.efforts.includes(value),
-      );
-      continue;
-    }
     models.set(model, {
       profile: name,
       model,
@@ -154,7 +155,7 @@ export function readProfiles(
           ? provider.name
           : profile.model_provider,
       effort,
-      efforts: [effort],
+      efforts: EFFORT_ORDER.filter((value) => declared.includes(value)),
       config: tuning,
     });
   }

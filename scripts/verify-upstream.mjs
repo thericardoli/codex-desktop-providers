@@ -47,7 +47,14 @@ client.sendConfigReadRequest = async () => ({
   layers: [
     {
       name: { type: "user" },
-      config: { profiles: { glm: { model_name: "GLM 5.3 Flash" } } },
+      config: {
+        profiles: {
+          glm: {
+            model_name: "GLM 5.3 Flash",
+            model_reasoning_efforts: ["low", "high", "max"],
+          },
+        },
+      },
     },
   ],
   config: {
@@ -55,16 +62,6 @@ client.sendConfigReadRequest = async () => ({
       openrouter: { name: "OpenRouter", wire_api: "responses" },
     },
     profiles: {
-      "glm-low": {
-        model,
-        model_provider: "openrouter",
-        model_reasoning_effort: "low",
-      },
-      "glm-max": {
-        model,
-        model_provider: "openrouter",
-        model_reasoning_effort: "max",
-      },
       glm: {
         model,
         model_provider: "openrouter",
