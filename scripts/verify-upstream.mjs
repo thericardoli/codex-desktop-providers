@@ -54,10 +54,10 @@ client.sendConfigReadRequest = async () => ({
         model_provider: "openrouter",
         model_reasoning_effort: "low",
       },
-      "glm-medium": {
+      "glm-max": {
         model,
         model_provider: "openrouter",
-        model_reasoning_effort: "medium",
+        model_reasoning_effort: "max",
       },
       glm: {
         model,
@@ -89,7 +89,7 @@ assert.equal(list.data[0].model, "gpt");
 assert.equal(list.data[1].model, model);
 assert.deepEqual(
   list.data[1].supportedReasoningEfforts.map((entry) => entry.reasoningEffort),
-  ["low", "medium", "high"],
+  ["low", "high", "max"],
 );
 await client.sendRequest("thread/start", { model }, {});
 assert.equal(calls.at(-1).params.modelProvider, "openrouter");
@@ -170,7 +170,7 @@ assert.deepEqual(
   selection.models[1].supportedReasoningEfforts.map(
     (entry) => entry.reasoningEffort,
   ),
-  ["low", "medium", "high"],
+  ["low", "high", "max"],
 );
 console.log(
   `PASS ${version}: actual model filter, native entitlement filtering, model listing, direct routing, prewarm and default selection`,

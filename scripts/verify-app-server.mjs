@@ -27,7 +27,7 @@ const server = createServer(async (request, response) => {
     for await (const chunk of request) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks));
     assert.equal(body.model, model);
-    assert.equal(body.reasoning?.effort, ["low", "medium"][received.length]);
+    assert.equal(body.reasoning?.effort, ["low", "max"][received.length]);
     assert.ok(Array.isArray(body.tools));
     received.push(body);
     response.writeHead(200, { "content-type": "text/event-stream" });
@@ -102,10 +102,10 @@ model_reasoning_effort = "high"
 model = "${model}"
 model_provider = "smoke"
 model_reasoning_effort = "low"
-[profiles.smoke-medium]
+[profiles.smoke-max]
 model = "${model}"
 model_provider = "smoke"
-model_reasoning_effort = "medium"
+model_reasoning_effort = "max"
 `,
   { mode: 0o600 },
 );
@@ -170,7 +170,7 @@ try {
     ephemeral: true,
   });
   assert.equal(started.thread.modelProvider, "smoke");
-  for (const effort of ["low", "medium"]) {
+  for (const effort of ["low", "max"]) {
     const turn = await client.sendRequest("turn/start", {
       threadId: started.thread.id,
       model,

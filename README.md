@@ -54,15 +54,15 @@ model = "z-ai/glm-5.3-flash"
 model_provider = "openrouter"
 model_reasoning_effort = "low"
 
-[profiles.openrouter-glm-5-3-flash-medium]
+[profiles.openrouter-glm-5-3-flash-max]
 model = "z-ai/glm-5.3-flash"
 model_provider = "openrouter"
-model_reasoning_effort = "medium"
+model_reasoning_effort = "max"
 ```
 
-This exposes **low / medium / high**, with **high** as the default. The
+This exposes **low / high / max**, with **high** as the default. The
 alphabetically first profile for a model determines its default; the unsuffixed
-main profile sorts before its `-low` and `-medium` variants. Effort options are
+main profile sorts before its `-low` and `-max` variants. Effort options are
 deduplicated and ordered by strength. Other overlapping model-tuning values must
 agree; variant profiles may omit shared tuning such as context-window size.
 Removing an effort profile removes that choice after config reload/restart.
@@ -74,6 +74,11 @@ and applies it to new-chat prewarming. Omitted effort on follow-ups and resume
 preserves native per-chat state. An unsupported stale value inherited from a
 different model falls back to this model's configured default. Session default
 selection remains in memory; it does not change global OpenAI settings.
+
+GLM-5.3-Flash natively supports `low`, `high`, and `max`; other values
+(including `medium`) fall back to `max` in its official chat template. Our main
+profile deliberately keeps `high` as the configured default, while the model's
+own omitted-parameter default is `max`. See the [official model card](https://huggingface.co/zai-org/GLM-5.3-Flash#note).
 
 Register only strengths your upstream supports. Native effort names accepted by
 the patch are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and

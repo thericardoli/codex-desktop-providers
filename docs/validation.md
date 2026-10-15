@@ -53,7 +53,7 @@ passed using the backend bundled with the supported desktop release.
 Version 0.2 also verifies that the actual patched model/effort selector preserves
 all declared custom choices even when native account settings enable only high,
 while native model filtering stays intact. The native backend test runs two turns
-with low and medium respectively (including collaboration mode), and checks the
+with low and max respectively (including collaboration mode), and checks the
 actual upstream `reasoning.effort` values rather than just picker metadata.
 
 ## Live provider verification
@@ -72,3 +72,12 @@ activating the Nix build, verify the visible menu, separate official/custom chat
 and restart/resume behavior in the actual Electron UI. Executing the patched
 method bodies and backend tests is evidence about those boundaries, not a claim
 that an interactive Electron session has already been checked.
+
+## GLM effort correction
+
+The GLM preset now declares only `low`, `high`, and `max`, following the
+[official Z.ai model card](https://huggingface.co/zai-org/GLM-5.3-Flash#note).
+Earlier low/medium live calls established transport acceptance only: the native
+model template treats unrecognized values such as `medium` as `max`. They did
+not establish a separate medium reasoning level. The current backend and
+upstream-asset checks exercise the corrected preset, including explicit `max`.

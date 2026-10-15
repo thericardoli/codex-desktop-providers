@@ -15,7 +15,7 @@ model = "z-ai/glm-5.3-flash"
 model_provider = "openrouter"
 model_reasoning_effort = "low"
 
-[profiles.openrouter-glm-5-3-flash-medium]
+[profiles.openrouter-glm-5-3-flash-max]
 model = "z-ai/glm-5.3-flash"
 model_provider = "openrouter"
-model_reasoning_effort = "medium"
+model_reasoning_effort = "max"

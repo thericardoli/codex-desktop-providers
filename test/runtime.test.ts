@@ -37,10 +37,10 @@ const config = () => ({
       model_provider: "openrouter",
       model_reasoning_effort: "low",
     },
-    "glm-medium": {
+    "glm-max": {
       model: MODEL,
       model_provider: "openrouter",
-      model_reasoning_effort: "medium",
+      model_reasoning_effort: "max",
     },
   },
 });
@@ -328,11 +328,11 @@ test("merge effort profiles into one ordered model and retain the primary defaul
   const entries = readProfiles(config());
   assert.equal(entries.size, 1);
   assert.equal(entries.get(MODEL)?.effort, "high");
-  assert.deepEqual(entries.get(MODEL)?.efforts, ["low", "medium", "high"]);
+  assert.deepEqual(entries.get(MODEL)?.efforts, ["low", "high", "max"]);
   const catalog = appendModels({ data: [] }, entries).data as JsonObject[];
   assert.deepEqual(
     catalog[0]?.supportedReasoningEfforts,
-    ["low", "medium", "high"].map((reasoningEffort) => ({
+    ["low", "high", "max"].map((reasoningEffort) => ({
       reasoningEffort,
       description: `${reasoningEffort} effort`,
     })),
@@ -387,16 +387,16 @@ test("honor selected effort in new chats, collaboration modes, and ordinary turn
     threadId: "thread-0",
     collaborationMode: {
       mode: "default",
-      settings: { model: MODEL, reasoning_effort: "medium" },
+      settings: { model: MODEL, reasoning_effort: "max" },
     },
     effort: "high",
   });
   assert.equal(
     object(object(calls.at(-1)?.params?.collaborationMode)?.settings)
       ?.reasoning_effort,
-    "medium",
+    "max",
   );
-  assert.equal(calls.at(-1)?.params?.effort, "medium");
+  assert.equal(calls.at(-1)?.params?.effort, "max");
   await client.sendRequest("turn/start", {
     threadId: "thread-0",
     model: MODEL,

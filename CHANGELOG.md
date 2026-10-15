@@ -1,12 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Correct the GLM-5.3-Flash preset to low/high/max, retaining high as the configured
+  default, and distinguish API acceptance from native model capability.
+
 ## 0.2.0
 
 - Merge same-model/provider native profiles into selectable reasoning strengths.
 - Preserve declared custom choices through desktop effort filtering.
 - Respect explicit effort, remember the session default for prewarming, and keep
   native per-chat effort on follow-ups and resume.
-- Exercise the real patched effort selector and native low/medium requests.
+- Exercise the real patched effort selector and native low/max requests.
 
 ## 0.1.0
 
