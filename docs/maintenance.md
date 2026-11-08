@@ -63,6 +63,19 @@ build. Building must not switch the live system.
 
 ## Rollback
 
+For catalog configuration, maintain `external-models.json` and point native
+`model_catalog_json` at the generated output. The `launch` command regenerates
+that output from the native cache before starting the packaged app. Do not edit
+the generated file or store native prompts/cache snapshots in this repository.
+Use an explicit absolute packaged application path to avoid launcher recursion.
+Refreshing the native cache remains a native Codex operation; the plugin never
+invokes credential helpers or maintains authentication of its own.
+
+When changing a user-level launcher, back up its previous file/symlink and native
+config, validate the generated catalog on an isolated backend, and publish the
+new input/config paths before restarting. A user-level local build override does
+not update the consumer's GitHub lock or activate a NixOS/Home Manager generation.
+
 Disable/remove the patch invocation in the consumer package and rebuild from the
 original upstream source, or return to a previous Nix generation. Remove a model
 profile to stop listing it. The patch does not migrate databases, rewrite login

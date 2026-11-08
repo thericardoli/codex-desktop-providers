@@ -11,7 +11,7 @@ export class Manager { setDefaultModelConfig(model, effort, profile) { return th
 
 export const picker = `export function visible({ model: selected, availableModels, useHiddenModels, hasConfiguredModelCatalog, apiKeyDaybreakSupported }) {
   let programs = selected.availableAccessPrograms?.cyber;
-  return availableModels.has(selected.model) && !selected.hidden && !programs;
+  return (hasConfiguredModelCatalog || availableModels.has(selected.model)) && !selected.hidden && !programs;
 }
 export function select({ models: catalog, enabledReasoningEfforts, defaultModel }) {
   return { models: catalog.map(model => ({...model, supportedReasoningEfforts: model.supportedReasoningEfforts.filter(e => enabledReasoningEfforts.has(e.reasoningEffort))})), defaultModel: null };

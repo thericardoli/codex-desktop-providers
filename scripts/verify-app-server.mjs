@@ -4,12 +4,13 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 import { intercept, writeDefault } from "../dist/runtime/index.js";
+import { prepareCatalog } from "../dist/runtime/catalog.js";
 
 const { values } = parseArgs({ options: { codex: { type: "string" } } });
 if (!values.codex) throw new Error("Expected --codex /path/to/native/codex");
@@ -18,6 +19,49 @@ const temporary = await mkdtemp(
   join(tmpdir(), "desktop-providers-app-server-"),
 );
 const received = [];
+const catalogPath = join(temporary, "models.json");
+const example = JSON.parse(
+  await readFile(new URL("../examples/models.json", import.meta.url), "utf8"),
+);
+const custom = example.models[0];
+assert.equal(custom.slug, model);
+const template = {
+  ...custom,
+  slug: "gpt-6-sol",
+  display_name: "Synthetic template",
+  model_messages: {
+    instructions_template:
+      "SYNTHETIC inherited model instructions for a localhost transport fixture.",
+  },
+};
+const nativePath = join(temporary, "native-cache.json");
+await writeFile(
+  nativePath,
+  JSON.stringify({
+    models: [
+      {
+        ...custom,
+        slug: "native-default",
+        display_name: "Synthetic native model",
+        priority: 0,
+        context_window: 272000,
+        max_context_window: 272000,
+        auto_compact_token_limit: null,
+      },
+      template,
+    ],
+  }),
+);
+const externalPath = new URL(
+  "../examples/external-models.json",
+  import.meta.url,
+);
+await prepareCatalog(nativePath, externalPath.pathname, catalogPath);
+const generated = JSON.parse(await readFile(catalogPath, "utf8"));
+assert.deepEqual(
+  generated.models.find((entry) => entry.slug === model).model_messages,
+  template.model_messages,
+);
 const server = createServer(async (request, response) => {
   try {
     assert.equal(request.method, "POST");
@@ -27,9 +71,28 @@ const server = createServer(async (request, response) => {
     for await (const chunk of request) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks));
     assert.equal(body.model, model);
-    assert.equal(body.reasoning?.effort, ["low", "max"][received.length]);
+    assert.equal(
+      body.reasoning?.effort,
+      ["low", "max", "max", "max"][received.length],
+    );
     assert.ok(Array.isArray(body.tools));
+    if (received.length === 0) {
+      assert.equal(
+        request.headers["x-openai-internal-codex-responses-lite"],
+        undefined,
+      );
+      assert.ok(body.tools.length > 0);
+      assert.ok(
+        JSON.stringify(body).includes(
+          template.model_messages.instructions_template,
+        ),
+      );
+    }
     received.push(body);
+    // Synthetic usage crosses the catalog's 900K threshold without sending a
+    // huge prompt: 800K must not compact; 900001 must compact before turn 3.
+    const inputTokens =
+      received.length === 1 ? 800000 : received.length === 2 ? 900001 : 1;
     response.writeHead(200, { "content-type": "text/event-stream" });
     const message = {
       id: "msg_smoke",
@@ -65,7 +128,11 @@ const server = createServer(async (request, response) => {
           status: "completed",
           model,
           output: [message],
-          usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+          usage: {
+            input_tokens: inputTokens,
+            output_tokens: 1,
+            total_tokens: inputTokens + 1,
+          },
         },
       },
     ])
@@ -87,6 +154,7 @@ await writeFile(
   join(temporary, "config.toml"),
   `
 model = "native-default"
+model_catalog_json = ${JSON.stringify(catalogPath)}
 approval_policy = "never"
 sandbox_mode = "read-only"
 [model_providers.smoke]
@@ -96,17 +164,15 @@ wire_api = "responses"
 env_key = "DESKTOP_PROVIDERS_SMOKE_KEY"
 [profiles.smoke]
 model = "${model}"
-model_name = "GLM 5.3 Flash"
-model_reasoning_efforts = ["low", "high", "max"]
 model_provider = "smoke"
-model_reasoning_effort = "high"
 `,
   { mode: 0o600 },
 );
 
 const child = spawn(values.codex, ["app-server", "--listen", "stdio://"], {
   env: {
-    ...process.env,
+    PATH: process.env.PATH,
+    HOME: temporary,
     CODEX_HOME: temporary,
     DESKTOP_PROVIDERS_SMOKE_KEY: "local-smoke-key",
   },
@@ -168,10 +234,10 @@ try {
   const started = await client.sendRequest("thread/start", {
     model,
     cwd: temporary,
-    ephemeral: true,
+    ephemeral: false,
   });
   assert.equal(started.thread.modelProvider, "smoke");
-  for (const effort of ["low", "max"]) {
+  for (const [index, effort] of ["low", "max", "max"].entries()) {
     const turn = await client.sendRequest("turn/start", {
       threadId: started.thread.id,
       model,
@@ -211,18 +277,37 @@ try {
     );
     assert.ok(completed, "Native inference must complete");
     assert.equal(completed.params.turn.status, "completed");
+    assert.equal(received.length, [1, 2, 4][index]);
+    assert.equal(
+      notifications.filter(
+        (entry) =>
+          entry.method === "item/completed" &&
+          entry.params.item.type === "contextCompaction",
+      ).length,
+      index === 2 ? 1 : 0,
+    );
   }
-  assert.equal(received.length, 2);
+  for (const method of ["thread/resume", "thread/fork"]) {
+    const result = await client.sendRequest(method, {
+      threadId: started.thread.id,
+      model,
+    });
+    assert.equal(result.thread.modelProvider, "smoke");
+  }
   const config = await raw("config/read", { includeLayers: true, cwd: null });
   assert.equal(config.config.model_provider ?? "openai", "openai");
-  assert.equal(config.config.profiles.smoke.model_name, undefined);
-  assert.equal(
-    config.layers.find((layer) => layer.name.type === "user").config.profiles
-      .smoke.model_name,
-    "GLM 5.3 Flash",
+  assert.equal(config.config.model_catalog_json, catalogPath);
+  const windows = notifications
+    .filter((entry) => entry.method === "thread/tokenUsage/updated")
+    .map((entry) => entry.params.tokenUsage.modelContextWindow);
+  assert.ok(windows.length >= 3);
+  assert.ok(
+    windows.every((window) => window === 996147),
+    JSON.stringify(windows),
   );
+  assert.ok(catalog.data.some((entry) => entry.model === "native-default"));
   console.log(
-    "PASS native app-server: registered profile → thread provider → direct authenticated Responses request → streamed completion; global provider remains OpenAI",
+    "PASS native app-server: JSON catalog, profile routing, low/max effort, 996147 usable context, 900K auto-compaction, resume/fork; global provider remains OpenAI",
   );
 } finally {
   clearTimeout(deadline);

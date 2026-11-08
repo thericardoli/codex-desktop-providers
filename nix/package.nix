@@ -41,6 +41,7 @@ buildNpmPackage {
   '';
   postInstall = ''
     node "$out/lib/node_modules/codex-desktop-providers/dist/cli.js" --help > /dev/null
+    test -f "$out/lib/node_modules/codex-desktop-providers/examples/external-models.json"
   '';
   meta = {
     description = "Structure-based direct-provider model support for Codex Desktop";

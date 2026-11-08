@@ -1,11 +1,11 @@
-# Merge into ~/.codex/config.toml, alongside your existing provider table.
+# Put this top-level key before any [table] in ~/.codex/config.toml.
+# The launcher generates this file from the native cache + external-models.json.
+model_catalog_json = "/absolute/path/to/desktop-providers.generated.json"
+
+# Merge alongside your existing provider table.
 # Keep the global model_provider unset (or "openai") to preserve native login.
 # This profile references [model_providers.openrouter]; it contains no API key.
 
 [profiles.openrouter-glm-5-3-flash]
 model = "z-ai/glm-5.3-flash"
-model_name = "GLM 5.3 Flash"
 model_provider = "openrouter"
-model_reasoning_effort = "high"
-model_reasoning_efforts = ["low", "high", "max"]
-model_context_window = 1048576

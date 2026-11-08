@@ -10,119 +10,158 @@ support Codex's Responses API requests, streaming, and tool calling.
 Every Desktop version is eligible: there is no version or source-hash allowlist.
 The patch discovers its code boundaries across renderer modules, independently
 of hashed filenames and bundling layout. Missing or ambiguous structural matches
-fail before writing. Tested on Linux x86_64 desktop **26.1007.71326**; this is test
+fail before writing. Tested on Linux x86_64 desktops **26.1007.71326** and
+**26.1021.22027**; this is test
 evidence, not a compatibility restriction. The application is proprietary; this
 repository contains the patch and synthetic tests only.
 
-## Configure models
+## Configure only external models
 
-Keep your existing `~/.codex/config.toml` provider, including its authentication:
+Maintain a small **external-models.json** file. The plugin's `launch` command
+reads the local native model cache, inherits external defaults from `gpt-6-sol`,
+and atomically generates a complete `model_catalog_json` before starting Desktop.
+Official entries are copied unchanged; you do not list or maintain them yourself.
+
+Start with [examples/external-models.json](examples/external-models.json):
+
+```json
+{
+  "template": "gpt-6-sol",
+  "models": [
+    {
+      "slug": "z-ai/glm-5.3-flash",
+      "display_name": "GLM 5.3 Flash",
+      "description": "GLM 5.3 Flash via OpenRouter",
+      "default_reasoning_level": "high",
+      "supported_reasoning_levels": [
+        { "effort": "low", "description": "Low reasoning effort" },
+        { "effort": "high", "description": "High reasoning effort" },
+        { "effort": "max", "description": "Maximum reasoning effort" }
+      ],
+      "context_window": 1048576,
+      "max_context_window": 1048576,
+      "auto_compact_token_limit": 900000,
+      "use_responses_lite": false
+    }
+  ]
+}
+```
+
+Every unspecified field inherits the template, including the complete
+`model_messages` bundle, instructions, tools, modalities and other metadata.
+Nested objects merge recursively; arrays replace. Explicit `false`, `null`, empty
+strings and empty arrays are preserved. Each external entry needs its own exact
+`slug` and `display_name`; its ID must not collide with a native model.
+
+The example explicitly disables `use_responses_lite`. With the tested native
+backend, inheriting `true` sends OpenAI's internal Lite header and omits prompt
+and tool declarations. With `false`, inherited prompts are sent as developer
+messages and tools are included. Other inherited capabilities are declarations,
+not proof that an external endpoint implements every GPT-specific tool or
+multi-agent behavior. Add explicit per-model overrides when a provider needs them.
+
+### Connect the generated catalog
+
+Put the **generated** path at the top level of `~/.codex/config.toml`, before any
+table. Profiles retain only provider routing:
 
 ```toml
+model_catalog_json = "/absolute/path/to/desktop-providers.generated.json"
+# Keep your normal official model as the global model.
+# Keep model_provider unset or "openai".
+
 [model_providers.openrouter]
 name = "OpenRouter"
 base_url = "https://openrouter.ai/api/v1"
 wire_api = "responses"
-# Keep your existing env_key OR [model_providers.openrouter.auth] configuration.
-```
+# Keep your existing native authentication configuration.
 
-Register a model using a native Codex profile:
-
-```toml
 [profiles.openrouter-glm-5-3-flash]
 model = "z-ai/glm-5.3-flash"
-model_name = "GLM 5.3 Flash"
 model_provider = "openrouter"
-model_reasoning_effort = "high"
-model_reasoning_efforts = ["low", "high", "max"]
-model_context_window = 1048576
 ```
 
-You do not select this as the global `profile`. The patch reads profiles and
-lists explicit third-party model/provider pairs in the menu. Profiles without
-both fields, and profiles using `openai`, do not add entries. Keep the global
-`model_provider` unset or `"openai"`; keep your normal official model as the global
-default. No global custom model catalog is required.
+Do not select the external profile as the global `profile`. Each external model
+needs one profile whose `model` exactly matches its catalog `slug`. Native provider
+credentials remain in their existing configuration and are never copied into
+catalog files.
 
-Restart the patched desktop after registration. Start a **new local Codex chat**
-and select `GLM 5.3 Flash (OpenRouter)`. Official model entries retain their
-native availability checks and use your existing ChatGPT login.
+Prepare the catalog without launching:
 
-## Configure model display names
-
-Set `model_name` on a model's main profile to give it a readable label:
-
-```toml
-[profiles.ollama-glm-5-3-flash]
-model = "glm-5.3-flash"
-model_name = "GLM 5.3 Flash"
-model_provider = "ollama-cloud"
-model_reasoning_effort = "high"
-model_reasoning_efforts = ["low", "high", "max"]
+```sh
+codex-desktop-providers catalog \
+  --native-cache /absolute/path/to/.codex/models_cache.json \
+  --external /absolute/path/to/external-models.json \
+  --output /absolute/path/to/desktop-providers.generated.json
 ```
 
-The menu shows `GLM 5.3 Flash (Ollama Cloud)`; the OpenRouter profile above shows
-`GLM 5.3 Flash (OpenRouter)`. The provider suffix distinguishes the two routes.
-`model` remains the exact upstream ID for requests, history, defaults, and
-provider matching. Names are presentation metadata and never enter inference
-configuration or request model IDs. Native OpenAI names are left unchanged.
+Use the launcher for automatic regeneration on each application start:
 
-Each model has one profile and one display name. Leading/trailing whitespace is
-trimmed, and non-string or blank names are rejected. Omitting `model_name`
-displays the upstream model ID.
-
-`model_name` is a **desktop patch extension**, not a native Codex inference key.
-The normalized native config omits it, so the patch reads this display field and the effort list
-from enabled, non-project raw config layers in native precedence order. Native
-Codex may log that it ignores this extension key; the patched desktop consumes
-it independently. The unpatched CLI continues to use the underlying model ID.
-
-## Configure selectable reasoning effort
-
-Use **one profile per model**. Declare its selectable strengths as a list:
-
-```toml
-[profiles.ollama-glm-5-3-flash]
-model = "glm-5.3-flash"
-model_name = "GLM 5.3 Flash"
-model_provider = "ollama-cloud"
-model_reasoning_efforts = ["low", "high", "max"]
-model_reasoning_effort = "high"
+```sh
+codex-desktop-providers launch \
+  --native-cache /absolute/path/to/.codex/models_cache.json \
+  --external /absolute/path/to/external-models.json \
+  --output /absolute/path/to/desktop-providers.generated.json \
+  --app /absolute/path/to/packaged/chatgpt -- "$@"
 ```
 
-- `model_reasoning_efforts` (plural) is required and declares the supported list.
-- `model_reasoning_effort` (singular) is the native default. It must occur in the
-  list. If omitted, the patch uses the first declared list item for new chats.
-- The list must be nonempty, contain recognized effort names, and have no
-  duplicates. The menu orders them by strength.
-- Register only one profile for each model ID. Old multi-profile effort variants
-  and scalar-only registrations are rejected; there is no compatibility shim.
+Configure the desktop shortcut or shell wrapper to invoke this command. `--app`
+must point to the actual packaged launcher, not back to the wrapper itself. App
+arguments after `--` are forwarded unchanged. A missing template, invalid source,
+duplicate ID or write failure stops launch and leaves the previous valid catalog
+intact. The generator never substitutes another model for a missing `gpt-6-sol`.
 
-The native singular key accepts one enum value. Assigning an array to it prevents
-native Codex from loading the whole configuration. The plural list is a patch
-extension read from enabled raw config layers, just like `model_name`. It is not
-forwarded to inference: the selected effort is sent as one native scalar value.
+### Refresh and native behavior
 
-Select the strength using the existing desktop reasoning/power selector. The
-patch retains declared third-party choices through native model-list filtering,
-forwards the chosen effort in both ordinary and collaboration-mode requests,
-and applies it to new-chat prewarming. Omitted effort on follow-ups and resume
-preserves native per-chat state. An unsupported stale value inherited from a
-different model falls back to this model's configured default. Session default
-selection remains in memory; it does not change global OpenAI settings.
+The input cache is the native Codex cache, **not the previously generated file**.
+Each launch picks up the latest entries and template already present in that
+cache. The plugin does not fetch remote model metadata, read credential files,
+invoke credential helpers, or modify `models_cache.json`. A missing/outdated
+native cache must be refreshed through the normal native Codex workflow.
 
-GLM-5.3-Flash natively supports `low`, `high`, and `max`; other values
-(including `medium`) fall back to `max` in its official chat template. Our main
-profile deliberately keeps `high` as the configured default, while the model's
-own omitted-parameter default is `max`. See the [official model card](https://huggingface.co/zai-org/GLM-5.3-Flash#note).
+The backend still loads the generated catalog as a static snapshot at startup.
+Running chats do not hot-reload changes; completely restart the app-server after
+editing external settings or refreshing native metadata. A persistent daemon may
+survive closing the Desktop window. Launch-time merging does not provide native
+per-thread catalog switching or continuous server-side catalog refresh.
 
-Register only strengths your upstream supports. Native effort names accepted by
-the patch are `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and
-`ultra`; configuration alone does not add a capability to an upstream model.
+Official entries preserve the native cache's default windows and metadata, plus
+normal account availability checks. They are not pinned in the user-maintained
+external file. Global `model_context_window` and compaction overrides still apply
+if present; remove them when each catalog model should supply its own defaults.
 
-Picker metadata advertises text input conservatively. Registration does not
-prove a provider supports every Codex tool, image format, or advanced desktop
-feature; inference capabilities remain controlled by the actual provider/backend.
+With the example overrides and a 95% usable fraction, the backend reports 996147
+usable tokens and a 900000 automatic-compaction threshold. Names, supported
+efforts, hidden flags and modalities are read from native `model/list`. Selected
+effort remains a scalar; omitted follow-up effort preserves native per-chat state.
+Resume/fork explicitly retain the verified provider, including model-less calls.
+
+The older complete [models.json](examples/models.json) remains a low-level
+standalone descriptor example and native smoke fixture. Prefer the sparse
+external configuration and generated output for everyday use. Never commit
+native cache snapshots, generated catalogs, or user configuration to this repo.
+
+### Migrate old profiles
+
+Move model settings out of inline profiles. The patch reports a migration error
+for legacy fields, including fields discarded by native normalization, instead
+of silently ignoring them.
+
+| Old profile field                | Native catalog field                                                   |
+| -------------------------------- | ---------------------------------------------------------------------- |
+| `model_name`                     | `display_name`                                                         |
+| `model_reasoning_efforts`        | `supported_reasoning_levels` (objects with `effort` and `description`) |
+| `model_reasoning_effort`         | `default_reasoning_level`                                              |
+| `model_context_window`           | `context_window` and `max_context_window`                              |
+| `model_auto_compact_token_limit` | `auto_compact_token_limit`                                             |
+| `model_reasoning_summary`        | `default_reasoning_summary`                                            |
+| `model_verbosity`                | `default_verbosity`                                                    |
+
+Keep only `model` and `model_provider` for the registration. Other native profile
+security/instruction settings are not copied into thread overrides. Supported
+reasoning efforts must be nonempty, unique, recognized by Codex, and include the
+declared default. For non-reasoning models declare `none` explicitly. Use the
+same upstream ID for the catalog `slug` and profile `model`.
 
 ## Build and check
 
@@ -207,8 +246,9 @@ After activation, completely quit and reopen the app to load the patched assets.
 - Provider is fixed per chat. Attempting to select a different provider in an
   existing chat is rejected; start a new chat instead. Resume and prewarm paths
   reuse the same routing rules.
-- Each registered model ID must identify one provider. The same upstream ID on multiple
-  providers, or an ID already in the native catalog, is rejected as ambiguous.
+- Each registered model ID must identify one provider and exactly one native
+  catalog entry. Duplicate registrations or missing/duplicate catalog entries fail
+  before inference. Entries are decorated in place, never appended a second time.
 - Third-party default selection uses the desktop's existing in-memory override.
   It does not rewrite the global OpenAI default and is not persisted across app
   restarts.

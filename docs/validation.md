@@ -115,3 +115,169 @@ source flake; its Desktop version is pinned independently in its own derivation.
 The pipeline does not launch the graphical app or make authenticated model
 requests. Existing real-backend smoke evidence above remains separate from
 these structural and archive checks.
+
+## Context-window probe (2026-11-08)
+
+An isolated probe used the backend bundled with Linux Desktop **26.1021.22027**
+(`codex-cli 0.164.0-alpha.11.1`), temporary configuration, and the localhost
+Responses fixture from `scripts/verify-app-server.mjs`. No user configuration,
+credentials, installed archive, or existing chat was modified.
+
+Before the catalog migration, the README's profile-level
+`model_context_window = 1048576` did **not** reach
+the thread override on this backend:
+
+- Native `config/read` retains the field in the raw user layer but removes it
+  from the normalized profile, warning that the profile key is ignored.
+- `readProfiles` copies model tuning only from normalized profiles. Its raw-layer
+  fallback recovers only `model_name` and `model_reasoning_efforts`.
+- Consequently, `thread/start.config` contains the reasoning effort but no
+  context-window override. Profile-level `model_auto_compact_token_limit` is
+  dropped in the same way.
+
+The existing unit tests supply these fields directly in synthetic normalized
+profiles, so their passing forwarding assertions do not establish native config
+loader compatibility. All 41 unit tests passed during this investigation.
+
+Two-turn localhost comparisons using `z-ai/glm-5.3-flash` returned
+`thread/tokenUsage/updated.tokenUsage.modelContextWindow = 258400` in every case:
+
+| Configuration route                     | Requested context window | Reported window |
+| --------------------------------------- | ------------------------ | --------------- |
+| README profile, current patch           | 1048576                  | 258400          |
+| Explicit `thread/start.config` override | 1048576                  | 258400          |
+| Top-level temporary `config.toml`       | 1048576                  | 258400          |
+
+For the top-level case, `config/read` confirmed the configured values
+`model_context_window = 1048576` and `model_auto_compact_token_limit = 900000`.
+Omitting model selection from follow-up turns did not change the reported window
+in either the explicit thread override or top-level case. The context-window
+field was absent from the fixture's Responses request bodies.
+
+These observations establish a profile-loading gap and an additional native
+backend/reporting limitation for this tested route. Recovering raw profile fields
+alone is not sufficient evidence of a fix. The probe did not fill the context
+window, trigger automatic compaction, or verify the graphical usage display;
+it does not establish whether all internal token-budget decisions ignore the
+top-level overrides, nor does it establish behavior on other backend versions.
+
+### Follow-up: native fallback ceiling
+
+Further isolated probes on the same Desktop backend passed smaller windows
+directly through `thread/start.config`:
+
+| Requested context window | Reported window |
+| ------------------------ | --------------- |
+| 65536                    | 62259           |
+| 131072                   | 124518          |
+| 262144                   | 249036          |
+| 300000                   | 258400          |
+| 1048576                  | 258400          |
+
+This narrows the earlier limitation: the native override is consumed, but large
+values hit a ceiling. The inspected upstream
+[`model_info.rs`](https://github.com/openai/codex/blob/main/codex-rs/models-manager/src/model_info.rs)
+sets both `context_window` and `max_context_window` to 272000 for unknown model
+slugs. `with_config_overrides` clamps the configured window to that maximum.
+The protocol's
+[`ModelInfo`](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/openai_models.rs)
+calculates usable context using `effective_context_window_percent` (95 for the
+fallback). These formulas match every observed result above. The source inspected
+was upstream main on 2026-11-08, not a claim of exact source identity with the
+bundled binary.
+
+A complete fix needs two distinct changes:
+
+1. Recover only the two missing budget fields from enabled, non-project raw
+   profile layers, with native precedence and positive safe-integer validation.
+   Preserve explicit request overrides and the existing thread provider guards.
+2. Supply accurate native model metadata, or change the native fallback handling
+   specifically for explicitly configured third-party threads. Keep known OpenAI
+   model metadata, entitlement checks, and provider authentication intact. This
+   is beyond the current renderer-only patch; recovering profile fields alone
+   cannot make a 1048576-token window usable on this tested backend.
+
+The official config schema describes `model_catalog_json` as startup-only;
+per-thread overrides do not reload it. Replacing the shared native catalog is not
+a drop-in fix for this project's mixed native/custom model menu. Validation of
+any complete fix must cover native window reports and actual compaction behavior,
+not only forwarded request fields or displayed UI values.
+
+## Native catalog migration (2026-11-08)
+
+The runtime now uses startup `model_catalog_json` as the model metadata source.
+It decorates existing native catalog entries and uses profiles only for explicit
+provider routing. Legacy profile model settings produce a migration error.
+This deliberately replaces the previous renderer-only registration design with
+a static native catalog; include unchanged official entries to keep those models.
+
+The native smoke script now loads the complete committed `examples/models.json`
+descriptor plus a synthetic native entry in an isolated temporary home. Against
+Desktop **26.1021.22027** / `codex-cli 0.164.0-alpha.11.1`, it verifies:
+
+- Three completed external-provider turns report a 996147-token usable window
+  from the configured 1048576 raw window and 95% usable fraction.
+- Low and max efforts reach the localhost Responses endpoint as native scalars.
+- Synthetic reported input usage of 800000 does not trigger compaction; 900001
+  triggers one native `contextCompaction` before the third user turn. Four
+  upstream requests complete: three normal turns and one local compaction.
+- Resume/fork retain the original custom provider and the global default remains
+  OpenAI. The tested native lifecycle needs an explicit matching `modelProvider`
+  to avoid falling back to its startup provider; the runtime now sends the
+  verified existing binding rather than relying on backend defaults.
+
+These are real native-backend operations with synthetic Responses usage. They
+verify context resolution and compaction decisions, not an external provider's
+ability to process an actual million-token prompt. No account credentials or
+external inference are used.
+
+Static native catalogs normally allow a model-picker availability shortcut.
+The visibility transform disables that shortcut for unregistered entries, so
+official entries still pass the original account/access-program checks. Only
+explicitly registered external entries use the custom-model branch.
+
+The real-archive harness locates tracing/effort helper bindings structurally,
+instead of relying on one build's minified names. Run `check`, patch, repeated
+`check`, and `verify-upstream.mjs` on disposable archives; installed applications
+must remain unchanged. Full interactive Electron verification and real-provider
+long-context inference remain outside these tests.
+
+All 43 synthetic tests, type checking, build, formatting, and version consistency
+passed. Disposable original archives for **26.1007.71326** and **26.1021.22027**
+passed the check/patch/check cycle and actual upstream method tests, including
+official availability filtering with `hasConfiguredModelCatalog = true`.
+
+## Automatic composition and template inheritance (2026-11-08)
+
+The new host-side `catalog` and `launch` commands read native cache metadata and
+an external-only specification. Synthetic tests cover unchanged official entries,
+complete prompt/capability inheritance, recursive overrides, explicit false/null
+and array replacement, native-ID collisions, missing templates, invalid budgets,
+atomic failure behavior, output/source alias protection, regeneration from updated
+native data, and launch ordering/arguments/exit codes. The Node-only composer is
+not injected into renderer assets.
+
+The native smoke now generates its catalog using a synthetic `gpt-6-sol` template
+and `examples/external-models.json`. It verifies inherited instructions reach the
+Responses request along with tools, while retaining the context/compaction and
+provider checks above.
+
+A separate private-cache probe on Desktop **26.1021.22027** verified six registered
+external models inherit every unspecified field from the actual local
+`gpt-6-sol` entry, including the full `model_messages` bundle. Native entries were
+equal to the source cache, without the earlier manually expanded default windows.
+Model windows remained 950000 or 996147 usable tokens, matching their explicit
+external limits.
+
+Exact inheritance of `use_responses_lite = true` produced the internal Lite header
+and omitted prompt/tool declarations. The user chose an explicit `false` override
+for external entries. A subsequent localhost probe showed developer prompt
+messages and seven tool declarations, no Lite header, and successful turns,
+compaction and resume/fork. This proves native serialization, not compatibility
+of every inherited GPT tool, service tier, or multi-agent protocol with the real
+external providers. No live provider inference or credential helpers were used.
+
+The generated catalog remains a startup snapshot. Launch-time regeneration uses
+the newest locally available native cache; it does not fetch account catalogs or
+refresh the running app-server. Missing cache/template data fails clearly rather
+than silently switching templates or reusing stale generated data.

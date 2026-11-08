@@ -14,12 +14,10 @@ export interface RequestClient {
 export interface RegisteredModel {
   profile: string;
   model: string;
-  modelName?: string;
   provider: string;
   providerName: string;
   effort: string;
   efforts: string[];
-  config: JsonObject;
 }
 
 export interface Registry {

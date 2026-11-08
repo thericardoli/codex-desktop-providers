@@ -158,11 +158,15 @@ export function findPatchEdits(source: string): PatchEdit[] {
       body.includes(".availableAccessPrograms?.cyber")
     ) {
       const model = boundName("model");
+      // A startup catalog normally makes every listed model visible. Only our
+      // explicitly routed external entries may use that exception; official
+      // entries must still pass the original native account/entitlement logic.
+      const configuredCatalog = boundName("hasConfiguredModelCatalog");
       edits.push({
         point: "visibility",
         start: fn.body.start + 1,
         end: fn.body.start + 1,
-        replacement: `if(${BINDING}.isRegisteredModel(${model}))return !${model}.hidden;`,
+        replacement: `if(${BINDING}.isRegisteredModel(${model}))return !${model}.hidden;${configuredCatalog}=false;`,
       });
     }
   });

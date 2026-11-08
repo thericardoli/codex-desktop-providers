@@ -34,13 +34,30 @@ for (const shared of sources)
     },
   );
 assert.equal(methods.length, 3);
-// The tested upstream fixture's prewarm path calls this upstream tracing helper. It is
-// stubbed here so this test remains independent of Electron and telemetry.
+// Locate the prewarm source-label helper structurally; minified names change.
+// The explicit trace passed below avoids initializing Electron telemetry.
+const traceSources = new Set();
+full(
+  parse(`class Fixture {${methods.join("\n")}}`, { ecmaVersion: "latest" }),
+  (node) => {
+    if (node.type !== "CallExpression" || node.callee.type !== "Identifier")
+      return;
+    const arg = node.arguments[0];
+    const value =
+      arg?.type === "Literal"
+        ? arg.value
+        : arg?.type === "TemplateLiteral" && arg.expressions.length === 0
+          ? arg.quasis[0].value.cooked
+          : undefined;
+    if (value === "thread/start") traceSources.add(node.callee.name);
+  },
+);
+assert.equal(traceSources.size, 1);
 const PatchedClient = Function(
   "__codexDesktopProviders",
-  "$fn",
+  ...traceSources,
   `return class {${methods.join("\n")}}`,
-)(runtime, () => "test");
+)(runtime, ...[...traceSources].map(() => () => "test"));
 const client = new PatchedClient();
 client.hostId = "local";
 client.requestClient = client;
@@ -48,37 +65,36 @@ client.dispatchMessage = () => {};
 const model = "z-ai/glm-5.3-flash";
 const calls = [];
 client.sendConfigReadRequest = async () => ({
-  layers: [
-    {
-      name: { type: "user" },
-      config: {
-        profiles: {
-          glm: {
-            model_name: "GLM 5.3 Flash",
-            model_reasoning_efforts: ["low", "high", "max"],
-          },
-        },
-      },
-    },
-  ],
   config: {
+    model: "gpt",
+    model_catalog_json: "/synthetic/models.json",
     model_providers: {
       openrouter: { name: "OpenRouter", wire_api: "responses" },
     },
-    profiles: {
-      glm: {
-        model,
-        model_provider: "openrouter",
-        model_reasoning_effort: "high",
-      },
-    },
+    profiles: { glm: { model, model_provider: "openrouter" } },
   },
 });
 client.enqueueRequest = async (method, params, options) => {
   calls.push({ method, params, options });
   if (method === "model/list")
     return {
-      data: [{ id: "gpt", model: "gpt", hidden: false }],
+      data: [
+        { id: "gpt", model: "gpt", hidden: false },
+        {
+          id: model,
+          model,
+          displayName: "GLM 5.3 Flash",
+          hidden: false,
+          supportedReasoningEfforts: ["low", "high", "max"].map(
+            (reasoningEffort) => ({
+              reasoningEffort,
+              description: reasoningEffort,
+            }),
+          ),
+          defaultReasoningEffort: "high",
+          inputModalities: ["text"],
+        },
+      ],
       nextCursor: null,
     };
   if (method === "thread/start")
@@ -141,7 +157,7 @@ const options = {
   additionalAvailableModels: new Set(),
   authMethod: "chatgpt",
   availableModels: new Set(),
-  hasConfiguredModelCatalog: false,
+  hasConfiguredModelCatalog: true,
   isCustomModelProvider: false,
   useHiddenModels: true,
 };
@@ -156,12 +172,25 @@ assert.equal(
 );
 assert.equal(visible({ ...options, model: list.data[1] }), true);
 assert.ok(selectorSource);
+const effortPredicates = new Set();
+full(parse(`(${selectorSource})`, { ecmaVersion: "latest" }), (node) => {
+  if (
+    node.type === "LogicalExpression" &&
+    node.operator === "&&" &&
+    node.left.type === "CallExpression" &&
+    node.left.callee.type === "Identifier" &&
+    node.left.arguments.length === 1 &&
+    node.left.arguments[0].type === "Identifier"
+  )
+    effortPredicates.add(node.left.callee.name);
+});
+assert.equal(effortPredicates.size, 1);
 const select = Function(
   "__codexDesktopProviders",
   filterName,
-  "Ste",
+  ...effortPredicates,
   `return (${selectorSource})`,
-)(runtime, visible, () => true);
+)(runtime, visible, ...[...effortPredicates].map(() => () => true));
 const native = {
   ...list.data[0],
   supportedReasoningEfforts: [

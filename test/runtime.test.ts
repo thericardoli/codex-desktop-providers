@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { intercept, prewarm, writeDefault } from "../src/runtime/index.js";
 import {
-  appendModels,
+  decorateModels,
   isRegisteredModel,
   readProfiles,
   restorePickerEfforts,
@@ -11,11 +11,13 @@ import {
   object,
   type JsonObject,
   type RequestClient,
+  type Sender,
 } from "../src/runtime/types.js";
 
 const MODEL = "z-ai/glm-5.3-flash";
-const config = () => ({
+const config = (): JsonObject => ({
   model: "native-gpt",
+  model_catalog_json: "/synthetic/models.json",
   model_providers: {
     openrouter: {
       name: "OpenRouter",
@@ -27,258 +29,353 @@ const config = () => ({
     glm: {
       model: MODEL,
       model_provider: "openrouter",
-      model_reasoning_effort: "high",
-      model_reasoning_efforts: ["low", "high", "max"],
-      model_context_window: 1048576,
       approval_policy: "never",
       developer_instructions: "must not be copied",
     },
   },
 });
+const nativeModel = () => ({
+  id: "native-gpt",
+  model: "native-gpt",
+  hidden: false,
+  isDefault: true,
+  availableAccessPrograms: { cyber: ["special"] },
+  supportedReasoningEfforts: [
+    { reasoningEffort: "low" },
+    { reasoningEffort: "high" },
+  ],
+});
+const customModel = (): JsonObject => ({
+  id: MODEL,
+  model: MODEL,
+  displayName: "GLM 5.3 Flash",
+  description: "Native catalog description",
+  hidden: false,
+  isDefault: false,
+  inputModalities: ["text", "image"],
+  supportedReasoningEfforts: ["low", "high", "max"].map((reasoningEffort) => ({
+    reasoningEffort,
+    description: reasoningEffort,
+  })),
+  defaultReasoningEffort: "high",
+  supportsPersonality: false,
+});
+function profileConfig(profile: JsonObject): JsonObject {
+  return { ...config(), profiles: { glm: profile } };
+}
+const route = () => ({ model: MODEL, model_provider: "openrouter" });
 
-function fixture(hostId = "local", layers?: unknown) {
+function fixture(
+  options: {
+    hostId?: string;
+    config?: JsonObject;
+    layers?: unknown;
+    catalog?: JsonObject[];
+    list?: (params?: JsonObject | null) => JsonObject;
+  } = {},
+) {
   const calls: {
     method: string;
     params: JsonObject | null | undefined;
     options: JsonObject | undefined;
   }[] = [];
   const threads = new Map<string, string>();
-  const nativeModel = {
-    id: "native-gpt",
-    model: "native-gpt",
-    hidden: false,
-    isDefault: true,
-    availableAccessPrograms: { cyber: ["special"] },
+  const native = nativeModel();
+  const custom = customModel();
+  const raw: Sender = async (method, params, requestOptions) => {
+    calls.push({ method, params, options: requestOptions });
+    if (method === "config/read")
+      return { config: options.config ?? config(), layers: options.layers };
+    if (method === "model/list")
+      return (
+        options.list?.(params) ?? {
+          data: options.catalog ?? [native, custom],
+          nextCursor: null,
+        }
+      );
+    if (method === "thread/start") {
+      const id = `thread-${threads.size}`;
+      const provider = String(params?.modelProvider ?? "openai");
+      threads.set(id, provider);
+      return { thread: { id, modelProvider: provider }, model: params?.model };
+    }
+    if (["thread/read", "thread/resume", "thread/fork"].includes(method))
+      return {
+        thread: {
+          id: params?.threadId,
+          modelProvider: threads.get(String(params?.threadId)),
+        },
+      };
+    return { ok: true };
   };
   const client: RequestClient = {
-    hostId,
-    sendRequest(method, params, options) {
-      return intercept(
-        client,
-        method,
-        params,
-        options,
-        async (method, params, options) => {
-          calls.push({ method, params, options });
-          if (method === "config/read") return { config: config(), layers };
-          if (method === "model/list")
-            return { data: [nativeModel], nextCursor: null };
-          if (method === "thread/start") {
-            const id = `thread-${threads.size}`;
-            const provider = String(params?.modelProvider ?? "openai");
-            threads.set(id, provider);
-            return {
-              thread: { id, modelProvider: provider },
-              model: params?.model,
-            };
-          }
-          if (
-            method === "thread/read" ||
-            method === "thread/resume" ||
-            method === "thread/fork"
-          )
-            return {
-              thread: {
-                id: params?.threadId,
-                modelProvider: threads.get(String(params?.threadId)),
-              },
-            };
-          return { ok: true };
-        },
-      );
-    },
+    hostId: options.hostId ?? "local",
+    sendRequest: (method, params, opts) =>
+      intercept(client, method, params, opts, raw),
   };
-  return { client, calls, threads, nativeModel };
+  return { client, calls, threads, native, custom };
 }
 
-test("register native profiles without copying provider auth or security settings", () => {
-  const entries = readProfiles(config());
-  const entry = entries.get(MODEL)!;
+test("use native catalog metadata and profiles only for provider routing", () => {
+  const entry = readProfiles(config(), [customModel()]).get(MODEL)!;
   assert.equal(entry.provider, "openrouter");
-  assert.deepEqual(entry.config, {
-    model_context_window: 1048576,
-    model_reasoning_effort: "high",
-  });
-  assert.equal(
-    JSON.stringify([...entries]).includes("DO_NOT_SERIALIZE"),
-    false,
-  );
-  assert.equal(
-    JSON.stringify([...entries]).includes("developer_instructions"),
-    false,
+  assert.equal(entry.effort, "high");
+  assert.deepEqual(entry.efforts, ["low", "high", "max"]);
+  assert.equal(Object.hasOwn(entry, "config"), false);
+  assert.doesNotMatch(
+    JSON.stringify([...readProfiles(config(), [customModel()])]),
+    /DO_NOT_SERIALIZE|developer_instructions|approval_policy/,
   );
 });
 
-test("use a configured display name without changing inference IDs or tuning", async () => {
-  const layers = [
-    {
-      name: { type: "user" },
-      config: { profiles: { glm: { model_name: " GLM 5.3 Flash " } } },
-    },
-  ];
-  const { client, calls, nativeModel } = fixture("local", layers);
-  const result = object(await client.sendRequest("model/list", {}))!;
-  const models = result.data as JsonObject[];
-  assert.equal(models[0], nativeModel);
-  assert.equal(models[1]?.displayName, "GLM 5.3 Flash (OpenRouter)");
-  assert.equal(models[1]?.description, "GLM 5.3 Flash via OpenRouter");
-  assert.equal(models[1]?.id, MODEL);
-  assert.equal(models[1]?.model, MODEL);
-  assert.equal(
-    calls.find((call) => call.method === "config/read")?.params?.includeLayers,
-    true,
-  );
-  await client.sendRequest("thread/start", { model: MODEL });
-  const request = calls.at(-1)?.params!;
-  assert.equal(request.model, MODEL);
-  assert.equal(request.modelProvider, "openrouter");
-  assert.equal(Object.hasOwn(object(request.config)!, "model_name"), false);
-});
-
-test("read display metadata from enabled config layers in native priority order", () => {
-  const layer = (type: string, label: string, disabledReason?: string) => ({
-    name: { type },
-    config: {
-      profiles: {
-        glm: {
-          model_name: label,
-          model: "must-not-override-native-id",
-          model_provider: "must-not-override-native-provider",
-        },
-      },
-    },
-    disabledReason,
-  });
-  const layers = [
-    layer("project", "Untrusted project name"),
-    layer("user", "Disabled name", "disabled"),
-    layer("sessionFlags", "CLI 模型名称"),
-    layer("user", "User name"),
-    layer("system", "System name"),
-  ];
-  const entry = readProfiles(config(), layers).get(MODEL)!;
-  assert.equal(entry.modelName, "CLI 模型名称");
-  assert.equal(entry.model, MODEL);
-  assert.equal(entry.provider, "openrouter");
-  assert.equal(
-    readProfiles(config(), [layer("project", "Ignored")]).get(MODEL)?.modelName,
-    undefined,
-  );
-});
-
-test("reject multiple profiles for the same model instead of merging legacy variants", () => {
-  const base = config();
+test("require the startup catalog and reject per-thread catalog selection", () => {
+  for (const model_catalog_json of [undefined, null, "", " ", 42])
+    assert.throws(
+      () => readProfiles({ ...config(), model_catalog_json }, [customModel()]),
+      /Configure model_catalog_json at startup/,
+    );
   assert.throws(
     () =>
-      readProfiles({
-        ...base,
-        profiles: {
-          ...base.profiles,
-          duplicate: { ...base.profiles.glm, model_reasoning_effort: "low" },
-        },
+      readProfiles(
+        profileConfig({ ...route(), model_catalog_json: "/other.json" }),
+        [customModel()],
+      ),
+    /per-thread catalogs/,
+  );
+  assert.equal(
+    readProfiles(
+      profileConfig({
+        ...route(),
+        model_catalog_json: "/synthetic/models.json",
       }),
-    /one profile per model/,
+      [customModel()],
+    ).size,
+    1,
   );
 });
 
-test("reject invalid model names and keep model-id fallback for unnamed entries", () => {
-  for (const model_name of ["", "   ", 123, {}, []]) {
+test("reject legacy profile model metadata even when native normalization dropped it", () => {
+  for (const [key, value] of Object.entries({
+    model_name: "GLM",
+    model_reasoning_efforts: ["high"],
+    model_reasoning_effort: "high",
+    model_context_window: 1048576,
+    model_auto_compact_token_limit: 900000,
+    model_reasoning_summary: "none",
+    model_verbosity: "low",
+  })) {
     assert.throws(
       () =>
-        readProfiles({
-          ...config(),
-          profiles: { glm: { ...config().profiles.glm, model_name } },
-        }),
-      /non-empty string/,
+        readProfiles(profileConfig({ ...route(), [key]: value }), [
+          customModel(),
+        ]),
+      /Move .* into model_catalog_json/,
+    );
+    assert.throws(
+      () =>
+        readProfiles(
+          config(),
+          [customModel()],
+          [
+            {
+              name: { type: "user" },
+              config: { profiles: { glm: { [key]: value } } },
+            },
+          ],
+        ),
+      /Move .* into model_catalog_json/,
     );
   }
-  const result = appendModels({ data: [] }, readProfiles(config()));
+});
+
+test("ignore disabled and project layers for legacy migration diagnostics", () => {
+  const layer = { config: { profiles: { glm: { model_context_window: 1 } } } };
   assert.equal(
-    (result.data as JsonObject[])[0]?.displayName,
-    `${MODEL} (OpenRouter)`,
+    readProfiles(
+      config(),
+      [customModel()],
+      [
+        { ...layer, name: { type: "project" } },
+        { ...layer, name: { type: "user" }, disabledReason: "untrusted" },
+      ],
+    ).size,
+    1,
   );
 });
 
-test("ignore official and non-model profiles", () => {
-  assert.equal(
-    readProfiles({
-      profiles: {
-        official: { model: "gpt", model_provider: "openai" },
-        security: { approval_policy: "never" },
-      },
-    }).size,
-    0,
-  );
-});
-
-test("reject undefined, incompatible, ambiguous and invalid-effort registrations", () => {
+test("require an exact, unambiguous loaded model and reject invalid provider routes", () => {
+  assert.throws(() => readProfiles(config(), []), /found 0/);
   assert.throws(
-    () => readProfiles({ profiles: config().profiles }),
+    () => readProfiles(config(), [customModel(), customModel()]),
+    /found 2/,
+  );
+  for (const model of ["", " ", ` ${MODEL}`])
+    assert.throws(
+      () => readProfiles(profileConfig({ ...route(), model }), [customModel()]),
+      /exact non-empty/,
+    );
+  assert.throws(
+    () =>
+      readProfiles(
+        { ...config(), profiles: { first: route(), second: route() } },
+        [customModel()],
+      ),
+    /multiple profiles/,
+  );
+  assert.throws(
+    () => readProfiles({ ...config(), model_providers: {} }, [customModel()]),
     /undefined provider/,
   );
   assert.throws(
     () =>
-      readProfiles({
-        ...config(),
-        model_providers: { openrouter: { wire_api: "chat" } },
-      }),
+      readProfiles(
+        { ...config(), model_providers: { openrouter: { wire_api: "chat" } } },
+        [customModel()],
+      ),
     /does not translate/,
   );
-  assert.throws(
-    () =>
-      readProfiles({
-        ...config(),
-        model_providers: {
-          ...config().model_providers,
-          other: { wire_api: "responses" },
-        },
+});
+
+test("leave native and non-model profiles unregistered", () => {
+  assert.equal(
+    readProfiles(
+      {
         profiles: {
-          ...config().profiles,
-          duplicate: { ...config().profiles.glm, model_provider: "other" },
+          official: { model: "gpt", model_provider: "openai" },
+          security: { approval_policy: "never" },
         },
-      }),
-    /one profile per model/,
-  );
-  assert.throws(
-    () =>
-      readProfiles({
-        ...config(),
-        profiles: {
-          glm: { ...config().profiles.glm, model_reasoning_effort: "invented" },
-        },
-      }),
-    /must be included/,
+      },
+      [],
+    ).size,
+    0,
   );
 });
 
-test("append model metadata without changing native entries or entitlement flags", async () => {
-  const { client, nativeModel } = fixture();
+test("preserve global OpenAI routing and the official default model", () => {
+  assert.throws(
+    () =>
+      readProfiles({ ...config(), model_provider: "openrouter" }, [
+        customModel(),
+      ]),
+    /global model_provider/,
+  );
+  assert.throws(
+    () => readProfiles({ ...config(), model: MODEL }, [customModel()]),
+    /official model as the global default/,
+  );
+});
+
+test("do not fetch a catalog when no external profiles are registered", async () => {
+  const { client, calls } = fixture({ config: { model: "native-gpt" } });
+  const params = { model: "native-gpt" };
+  await client.sendRequest("thread/start", params);
+  assert.equal(calls.at(-1)?.params, params);
+  assert.equal(
+    calls.some((call) => call.method === "model/list"),
+    false,
+  );
+});
+
+test("validate native effort declarations without inventing options or defaults", () => {
+  for (const supportedReasoningEfforts of [
+    undefined,
+    [],
+    [{}],
+    [{ reasoningEffort: "invented" }],
+    [{ reasoningEffort: "high" }, { reasoningEffort: "high" }],
+  ])
+    assert.throws(
+      () =>
+        readProfiles(config(), [
+          { ...customModel(), supportedReasoningEfforts },
+        ]),
+      /supported reasoning efforts/,
+    );
+  for (const defaultReasoningEffort of [null, undefined, "medium"])
+    assert.throws(
+      () =>
+        readProfiles(config(), [{ ...customModel(), defaultReasoningEffort }]),
+      /default included/,
+    );
+  for (const displayName of [null, "", " ", 123])
+    assert.throws(
+      () => readProfiles(config(), [{ ...customModel(), displayName }]),
+      /display name/,
+    );
+});
+
+test("decorate native catalog entries without duplicates or changing official metadata", async () => {
+  const { client, native, custom } = fixture();
   const response = object(await client.sendRequest("model/list", {}))!;
   const data = response.data as JsonObject[];
-  assert.equal(data[0], nativeModel);
   assert.equal(data.length, 2);
-  assert.equal(data[1]?.model, MODEL);
-  assert.equal(data[1]?.displayName, `${MODEL} (OpenRouter)`);
+  assert.equal(data[0], native);
+  assert.equal(isRegisteredModel(data[0]), false);
   assert.equal(isRegisteredModel(data[1]), true);
-  assert.equal(isRegisteredModel(nativeModel), false);
+  assert.deepEqual(data[1], {
+    ...custom,
+    displayName: "GLM 5.3 Flash (OpenRouter)",
+    codexDesktopProvider: "openrouter",
+  });
 });
 
-test("respect native pagination and reject collisions with the native catalog", () => {
-  const entries = readProfiles(config());
-  const first = { data: [], nextCursor: "page2" };
-  assert.equal(appendModels(first, entries), first);
-  assert.throws(
-    () => appendModels({ data: [{ model: MODEL }], nextCursor: null }, entries),
-    /ambiguous provider/,
+test("preserve native pagination and discover registered entries on later pages", async () => {
+  const native = nativeModel();
+  const custom = customModel();
+  const { client, calls } = fixture({
+    list: (params) =>
+      params?.cursor === "second"
+        ? { data: [custom], nextCursor: null }
+        : { data: [native], nextCursor: "second" },
+  });
+  const first = object(await client.sendRequest("model/list", { limit: 1 }))!;
+  assert.equal(first.nextCursor, "second");
+  assert.deepEqual(first.data, [native]);
+  const second = object(
+    await client.sendRequest("model/list", { cursor: "second", limit: 1 }),
+  )!;
+  assert.equal(
+    (second.data as JsonObject[])[0]?.displayName,
+    "GLM 5.3 Flash (OpenRouter)",
   );
-  assert.throws(
-    () =>
-      appendModels({ data: [{ model: MODEL }], nextCursor: "page2" }, entries),
-    /ambiguous provider/,
-  );
+  assert.equal(calls.filter((c) => c.method === "config/read").length, 1);
+  assert.equal(calls.filter((c) => c.method === "model/list").length, 4);
 });
 
-test("route new custom chats directly with only whitelisted model tuning", async () => {
+test("reject missing or cyclic native catalog responses before routing", async () => {
+  for (const list of [
+    () => ({}),
+    () => ({ data: [], nextCursor: "again" }),
+    () => ({ data: [], nextCursor: 42 }),
+  ]) {
+    const { client, calls } = fixture({ list });
+    await assert.rejects(
+      client.sendRequest("thread/start", { model: MODEL }),
+      /catalog/,
+    );
+    assert.equal(
+      calls.some((c) => c.method === "thread/start"),
+      false,
+    );
+  }
+});
+
+test("concurrent ordinary requests retain routing guards during catalog loading", async () => {
+  const { client, calls } = fixture();
+  const [a, b] = await Promise.allSettled([
+    client.sendRequest("thread/start", { model: MODEL }),
+    client.sendRequest("thread/start", {
+      model: MODEL,
+      modelProvider: "wrong",
+    }),
+  ]);
+  assert.equal(a.status, "fulfilled");
+  assert.equal(b.status, "rejected");
+  assert.equal(calls.filter((c) => c.method === "config/read").length, 1);
+  assert.equal(calls.filter((c) => c.method === "thread/start").length, 1);
+});
+
+test("route new chats with catalog effort while leaving native context metadata to the backend", async () => {
   const { client, calls } = fixture();
   await client.sendRequest("thread/start", {
     model: MODEL,
@@ -286,18 +383,15 @@ test("route new custom chats directly with only whitelisted model tuning", async
     config: { "features.example": false },
     cwd: "/project",
   });
-  const sent = calls.find((call) => call.method === "thread/start")!.params!;
-  assert.equal(sent.model, MODEL);
-  assert.equal(sent.modelProvider, "openrouter");
-  assert.equal(sent.cwd, "/project");
-  assert.deepEqual(sent.config, {
-    model_context_window: 1048576,
-    model_reasoning_effort: "high",
-    "features.example": false,
+  assert.deepEqual(calls.at(-1)?.params, {
+    model: MODEL,
+    modelProvider: "openrouter",
+    config: { "features.example": false, model_reasoning_effort: "high" },
+    cwd: "/project",
   });
 });
 
-test("leave official starts and explicit unrelated runtimes untouched", async () => {
+test("leave official starts untouched and reject conflicting custom providers", async () => {
   const { client, calls } = fixture();
   const original = { model: "native-gpt", modelProvider: null };
   await client.sendRequest("thread/start", original);
@@ -305,202 +399,131 @@ test("leave official starts and explicit unrelated runtimes untouched", async ()
   await assert.rejects(
     client.sendRequest("thread/start", {
       model: MODEL,
-      modelProvider: "another",
+      modelProvider: "other",
     }),
     /Conflicting provider/,
   );
 });
 
-test("apply routing to the native prewarm path", async () => {
+test("load native catalog for prewarming even before any model-list request", async () => {
   const { client } = fixture();
   let sent: JsonObject | undefined;
   await prewarm(client, { model: MODEL }, async (params) => {
     sent = params;
-    return { thread: { id: "prewarmed", modelProvider: "openrouter" } };
+    return { thread: { id: "warm", modelProvider: "openrouter" } };
   });
   assert.equal(sent?.modelProvider, "openrouter");
+  assert.deepEqual(sent?.config, { model_reasoning_effort: "high" });
 });
 
-test("pin provider for follow-up turns and reject switching in either direction", async () => {
-  const { client, calls } = fixture();
-  await client.sendRequest("thread/start", { model: MODEL });
-  await client.sendRequest("turn/start", {
-    threadId: "thread-0",
-    collaborationMode: {
-      mode: "default",
-      settings: { model: MODEL, reasoning_effort: "ultra" },
-    },
-  });
-  const sent = calls.at(-1)?.params!;
-  assert.equal(
-    object(object(sent.collaborationMode)?.settings)?.reasoning_effort,
-    "high",
-  );
-  await assert.rejects(
-    client.sendRequest("turn/start", {
-      threadId: "thread-0",
-      model: "native-gpt",
-    }),
-    /Start a new chat/,
-  );
-  await client.sendRequest("thread/start", { model: "native-gpt" });
-  await assert.rejects(
-    client.sendRequest("turn/start", { threadId: "thread-1", model: MODEL }),
-    /Start a new chat/,
-  );
-});
-
-test("verify persisted provider before resuming a custom model", async () => {
-  const { client, threads, calls } = fixture();
-  threads.set("old", "openrouter");
-  await client.sendRequest("thread/resume", { threadId: "old", model: MODEL });
-  assert.deepEqual(calls.at(-1)?.params?.config, {
-    model_context_window: 1048576,
-  });
-  assert.equal(calls.at(-1)?.params?.effort, undefined);
+test("pin providers for turns, resume and forks; never rewrite existing chats", async () => {
+  const { client, threads } = fixture();
+  threads.set("custom", "openrouter");
   threads.set("official", "openai");
-  await assert.rejects(
-    client.sendRequest("thread/resume", { threadId: "official", model: MODEL }),
-    /Start a new chat/,
-  );
-  await assert.rejects(
-    client.sendRequest("thread/resume", { threadId: "missing", model: MODEL }),
-    /Could not verify/,
-  );
+  for (const method of ["turn/start", "thread/resume", "thread/fork"]) {
+    await assert.rejects(
+      client.sendRequest(method, { threadId: "official", model: MODEL }),
+      /Start a new chat/,
+    );
+    await client.sendRequest(method, { threadId: "custom", model: MODEL });
+    await assert.rejects(
+      client.sendRequest(method, { threadId: "custom", model: "native-gpt" }),
+      /Start a new chat/,
+    );
+    await assert.rejects(
+      client.sendRequest(method, { threadId: "missing", model: MODEL }),
+      /Could not verify/,
+    );
+  }
 });
 
-test("do not perform extra thread reads for ordinary native turns", async () => {
+test("resume and fork preserve native tuning and explicit selected effort", async () => {
+  const { client, calls, threads } = fixture();
+  threads.set("old", "openrouter");
+  for (const method of ["thread/resume", "thread/fork"]) {
+    const params = { threadId: "old", model: MODEL };
+    await client.sendRequest(method, params);
+    assert.deepEqual(calls.at(-1)?.params, {
+      ...params,
+      modelProvider: "openrouter",
+    });
+    await client.sendRequest(method, {
+      ...params,
+      config: { model_reasoning_effort: "low", "features.example": false },
+    });
+    assert.deepEqual(calls.at(-1)?.params?.config, {
+      model_reasoning_effort: "low",
+      "features.example": false,
+    });
+  }
+});
+
+test("preserve persisted provider on model-less resume/fork and reject provider-only switches", async () => {
+  const { client, calls, threads } = fixture();
+  threads.set("old", "openrouter");
+  for (const method of ["thread/resume", "thread/fork"]) {
+    await client.sendRequest(method, { threadId: "old" });
+    assert.deepEqual(calls.at(-1)?.params, {
+      threadId: "old",
+      modelProvider: "openrouter",
+    });
+    await assert.rejects(
+      client.sendRequest(method, { threadId: "old", modelProvider: "openai" }),
+      /Start a new chat/,
+    );
+  }
+});
+
+test("do not read native history for ordinary native turns", async () => {
   const { client, calls } = fixture();
   await client.sendRequest("turn/start", {
-    threadId: "unknown-native",
+    threadId: "native",
     model: "native-gpt",
   });
   assert.equal(
-    calls.some((call) => call.method === "thread/read"),
+    calls.some((c) => c.method === "thread/read"),
     false,
   );
 });
 
-test("unify only unspecified thread list filters", async () => {
+test("unify only unspecified history filters without loading catalog", async () => {
   const { client, calls } = fixture();
   await client.sendRequest("thread/list", { modelProviders: null });
   assert.deepEqual(calls.at(-1)?.params?.modelProviders, []);
   const explicit = { modelProviders: ["openai"] };
   await client.sendRequest("thread/list", explicit);
   assert.equal(calls.at(-1)?.params, explicit);
+  assert.equal(
+    calls.some((c) => c.method === "config/read"),
+    false,
+  );
 });
 
-test("custom default selection does not write global model/provider or credentials", async () => {
-  const { client } = fixture();
+test("keep custom defaults in memory and remember selected effort for new chats", async () => {
+  const { client, calls } = fixture();
   let writes = 0;
   const write = async () => {
     writes++;
-    return { status: "ok" };
+    return {};
   };
-  assert.deepEqual(await writeDefault(client, MODEL, "high", write), {
+  assert.deepEqual(await writeDefault(client, MODEL, "low", write), {
     status: "okOverridden",
   });
   assert.equal(writes, 0);
+  await client.sendRequest("thread/start", { model: MODEL });
+  assert.equal(
+    object(calls.at(-1)?.params?.config)?.model_reasoning_effort,
+    "low",
+  );
+  await prewarm(client, { model: MODEL }, async (params) => {
+    assert.equal(object(params.config)?.model_reasoning_effort, "low");
+    return {};
+  });
   await writeDefault(client, "native-gpt", "high", write);
   assert.equal(writes, 1);
 });
 
-test("read one explicit effort list with canonical order and a declared default", () => {
-  const entry = readProfiles(config()).get(MODEL)!;
-  assert.equal(entry.effort, "high");
-  assert.deepEqual(entry.efforts, ["low", "high", "max"]);
-  const base = config();
-  const firstDefault = readProfiles({
-    ...base,
-    profiles: {
-      glm: {
-        ...base.profiles.glm,
-        model_reasoning_effort: null,
-        model_reasoning_efforts: ["max", "low", "high"],
-      },
-    },
-  }).get(MODEL)!;
-  assert.equal(firstDefault.effort, "max");
-  assert.deepEqual(firstDefault.efforts, ["low", "high", "max"]);
-});
-
-test("require valid nonempty lists and reject legacy scalar-only registrations", () => {
-  const base = config();
-  for (const model_reasoning_efforts of [
-    undefined,
-    null,
-    [],
-    "high",
-    ["high", 123],
-    ["invented"],
-    ["high", "high"],
-  ]) {
-    assert.throws(
-      () =>
-        readProfiles({
-          ...base,
-          profiles: { glm: { ...base.profiles.glm, model_reasoning_efforts } },
-        }),
-      /model_reasoning_efforts/,
-    );
-  }
-  assert.throws(
-    () =>
-      readProfiles({
-        ...base,
-        profiles: {
-          glm: { ...base.profiles.glm, model_reasoning_effort: "medium" },
-        },
-      }),
-    /must be included/,
-  );
-});
-
-test("read list metadata from enabled native layers without copying it into inference config", () => {
-  const base = config();
-  const { model_reasoning_efforts: removed, ...profile } = base.profiles.glm;
-  void removed;
-  const effective = { ...base, profiles: { glm: profile } };
-  const layer = (type: string, efforts: unknown, disabledReason?: string) => ({
-    name: { type },
-    disabledReason,
-    config: { profiles: { glm: { model_reasoning_efforts: efforts } } },
-  });
-  const entry = readProfiles(effective, [
-    layer("project", ["ultra"]),
-    layer("user", ["none"], "disabled"),
-    layer("sessionFlags", ["low", "high", "max"]),
-    layer("user", ["high"]),
-  ]).get(MODEL)!;
-  assert.deepEqual(entry.efforts, ["low", "high", "max"]);
-  assert.equal(Object.hasOwn(entry.config, "model_reasoning_efforts"), false);
-  assert.throws(
-    () => readProfiles(effective, [layer("project", ["high"])]),
-    /non-empty list/,
-  );
-});
-
-test("keep declared effort options despite native account filtering without changing native models", () => {
-  const catalog = appendModels({ data: [] }, readProfiles(config()))
-    .data as JsonObject[];
-  const native = {
-    model: "native-gpt",
-    supportedReasoningEfforts: [{ reasoningEffort: "high" }],
-  };
-  const custom = { ...catalog[0], supportedReasoningEfforts: [] };
-  const result = restorePickerEfforts(
-    { models: [native, custom], defaultModel: custom },
-    catalog,
-  );
-  assert.equal((result.models as JsonObject[])[0], native);
-  assert.deepEqual(
-    (result.models as JsonObject[])[1]?.supportedReasoningEfforts,
-    catalog[0]?.supportedReasoningEfforts,
-  );
-  assert.equal(result.defaultModel, (result.models as JsonObject[])[1]);
-});
-
-test("honor selected effort in new chats, collaboration modes, and ordinary turns", async () => {
+test("honor scalar and collaboration-mode effort, preserving omitted follow-up effort", async () => {
   const { client, calls } = fixture();
   await client.sendRequest("thread/start", {
     model: MODEL,
@@ -527,43 +550,48 @@ test("honor selected effort in new chats, collaboration modes, and ordinary turn
   await client.sendRequest("turn/start", {
     threadId: "thread-0",
     model: MODEL,
-    effort: "low",
+    effort: "ultra",
   });
-  assert.equal(calls.at(-1)?.params?.effort, "low");
+  assert.equal(calls.at(-1)?.params?.effort, "high");
   const followup = { threadId: "thread-0", model: MODEL };
   await client.sendRequest("turn/start", followup);
   assert.equal(calls.at(-1)?.params, followup);
 });
 
-test("remember effort for subsequent new chats and prewarming without global writes", async () => {
-  const { client, calls } = fixture();
-  await writeDefault(client, MODEL, "low", async () => {
-    throw Error("must not persist");
-  });
-  await client.sendRequest("thread/start", { model: MODEL });
-  assert.equal(
-    object(calls.at(-1)?.params?.config)?.model_reasoning_effort,
-    "low",
+test("preserve catalog hidden flags and native effort filtering", () => {
+  const native = nativeModel();
+  const custom: JsonObject = { ...customModel(), hidden: true };
+  const entries = readProfiles(config(), [native, custom]);
+  const catalog = decorateModels({ data: [native, custom] }, entries)
+    .data as JsonObject[];
+  assert.equal(catalog[1]?.hidden, true);
+  const filteredNative = {
+    ...native,
+    supportedReasoningEfforts: [{ reasoningEffort: "high" }],
+  };
+  const result = restorePickerEfforts(
+    {
+      models: [
+        filteredNative,
+        { ...catalog[1], supportedReasoningEfforts: [] },
+      ],
+      defaultModel: filteredNative,
+    },
+    catalog,
   );
-  await prewarm(client, { model: MODEL }, async (params) => {
-    assert.equal(object(params.config)?.model_reasoning_effort, "low");
-    return {};
-  });
-  await client.sendRequest("thread/resume", {
-    threadId: "thread-0",
-    model: MODEL,
-  });
-  assert.equal(
-    object(calls.at(-1)?.params?.config)?.model_reasoning_effort,
-    undefined,
+  assert.equal((result.models as JsonObject[])[0], filteredNative);
+  assert.deepEqual(
+    (result.models as JsonObject[])[1]?.supportedReasoningEfforts,
+    custom.supportedReasoningEfforts,
   );
+  assert.equal(result.defaultModel, filteredNative);
 });
 
-test("leave remote and cloud requests outside the patch", async () => {
-  const { client, calls } = fixture("remote-host");
+test("leave remote and cloud transports untouched", async () => {
+  const { client, calls } = fixture({ hostId: "remote" });
   await client.sendRequest("thread/start", { model: MODEL });
   assert.deepEqual(
-    calls.map((call) => call.method),
+    calls.map((c) => c.method),
     ["thread/start"],
   );
   assert.equal(calls[0]?.params?.modelProvider, undefined);

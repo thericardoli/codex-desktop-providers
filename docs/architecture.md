@@ -1,27 +1,57 @@
 # Architecture
 
-The build-time CLI is Node.js/TypeScript. The injected renderer modules are plain
-ES modules emitted by the TypeScript compiler; they have no Node.js dependencies
-and no HTTP client. There is no daemon or inference proxy to run.
+The CLI is Node.js/TypeScript. Its build-time check/patch commands modify disposable
+archives; host-side catalog/launch commands prepare metadata before application
+startup. The injected renderer modules are plain ES modules with no Node.js
+imports or HTTP client. The host-only `src/runtime/catalog.ts` module is not
+injected into ASAR. There is no daemon or inference proxy.
+
+## Startup catalog generation
+
+The launcher reads an existing native `models_cache.json` and a user-authored
+external-only specification. Official entries pass through unchanged. Every
+external entry deep-merges its explicit overrides over one exact native template
+(default example: `gpt-6-sol`). Nested objects merge, arrays replace, and explicit
+null/false/empty values survive. Cache account/identity metadata is not written.
+
+Generation validates identities, collisions, effort defaults and budgets before
+writing. It fsyncs a private sibling temporary file, checks that source file
+identities have not changed, and atomically renames the result. Source aliases,
+credential-file inputs and symlink outputs are rejected. Generation failures
+prevent launch. No process or helper is invoked to obtain credentials or refresh
+remote metadata; existing native cache contents are the source.
+
+The application still consumes a static startup catalog. Regeneration happens on
+launch, not during a running conversation. Only the external specification is
+maintained by the user; the combined catalog is disposable generated data.
 
 ## Data flow
 
 1. The native renderer request client receives `model/list`.
-2. The runtime reads the effective native config and raw layers with `config/read`. It retains
-   only registered model metadata and model tuning, not provider credentials.
-3. Native models are left intact and explicit third-party profiles are appended.
-   Only those tagged additions bypass the desktop's official catalog filter.
-4. At `thread/start`, the runtime adds `modelProvider` and whitelisted model
-   tuning. Codex's app-server performs native provider authentication and makes
-   the direct upstream request.
+2. The runtime reads effective native config with `config/read` and all pages of
+   native `model/list`. Raw config layers are used only to diagnose legacy fields.
+   The app-server has already loaded `model_catalog_json` at startup.
+3. Explicit third-party profiles map catalog model IDs to providers. Matching
+   entries receive a provider label/marker; all other entries remain unchanged.
+   Names, efforts, modalities and hidden flags come from the native catalog.
+4. At `thread/start`, the runtime adds `modelProvider` and selected scalar effort.
+   Context windows, compaction, instructions and other capabilities remain native
+   catalog settings. Codex performs native authentication and direct inference.
 5. The native prewarm path gets the same transformation. Thread responses supply
    authoritative provider identity, cached per renderer request client.
-6. Follow-up turns retain the provider. A cross-provider request fails before
-   inference. Resuming a registered model verifies persisted thread metadata.
+6. Follow-up turns retain the provider. Resume/fork verifies persisted metadata
+   and explicitly sends the same provider, including model-less requests. A
+   cross-provider request fails before inference.
 
-The runtime does not change tool execution, approvals, sandboxing, instruction
-loading, plugins, credentials, or the native stream scheduler. Profile fields
-unrelated to model tuning are deliberately not copied into thread overrides.
+The runtime does not change tool execution, approvals, sandboxing, plugins,
+credentials, or the native stream scheduler. Profile security/instruction fields
+are never copied into thread overrides. Model instructions and capabilities in
+user-authored native catalogs are consumed by the native backend as usual.
+
+A single static catalog replaces dynamic native model discovery for this process.
+The launcher includes unchanged official entries from the native cache. Per-thread catalog paths do not reload native metadata and are rejected
+when different from the startup catalog. This is an explicit tradeoff of the
+selected `model_catalog_json` configuration, not an additive catalog mechanism.
 
 ## Boundaries in upstream code
 
@@ -31,7 +61,9 @@ unrelated to model tuning are deliberately not copied into thread overrides.
 - `AppServerRequestClient.prewarmThreadStart`
 - The conversation manager's `setDefaultModelConfig`
 - The model visibility predicate, identified by destructured property names
-  and its access-program check rather than a minified function name
+  and its access-program check rather than a minified function name; static
+  catalog visibility shortcuts are disabled for unregistered entries so native
+  official-model availability checks still run
 - The model/effort selector, restoring explicitly registered third-party options
   after native account-level filtering while retaining native model behavior
 
@@ -69,18 +101,16 @@ The desktop's own temporary model override holds third-party default selection.
 This prevents UI selection from writing a third-party ID into the global OpenAI
 configuration used by CLI and background tasks.
 
-`model_name` and required `model_reasoning_efforts` are read from the effective profile when present or from
-enabled, non-project raw layers (highest precedence first). Native config
-normalization drops these extension fields. Only presentation/capability metadata
-is recovered from raw layers; routing/auth still use native effective config.
-Each model has one profile; repeated model registrations fail clearly.
-Only the menu's `displayName` changes; the `id`, `model`, thread parameters,
-history identity and provider mapping remain the upstream ID.
+Profiles contain provider routing only. Legacy model metadata in normalized
+profiles or enabled non-project raw layers produces a migration error. Catalog
+entries must match exact model IDs and declare valid scalar default/reasoning
+options. No metadata is fabricated or read from arbitrary renderer filesystem
+paths. Native catalog reads are marked by request-object identity to avoid
+recursion without disabling guards for concurrent UI requests. Pagination is
+preserved; repeated/invalid cursors fail closed.
 
-Each profile declares a nonempty, duplicate-free list of reasoning efforts. The
-native singular `model_reasoning_effort` supplies its default, or the first list
-item is used if no default is configured. Only selected scalar effort is forwarded
-to inference. Explicit request effort takes precedence over in-memory selection,
-then the profile default. Missing effort on follow-ups/resume is left to native
-per-chat persistence, so changing to low is not undone by the next turn. No legacy
-multi-profile merging or scalar-only compatibility path remains.
+Only selected scalar effort is forwarded to inference. Explicit request effort
+takes precedence over in-memory selection, then the native catalog default.
+Missing effort on follow-ups/resume is left to native per-chat persistence.
+Changing JSON requires restarting the native app-server; refreshing the routing
+cache cannot reload its startup catalog.

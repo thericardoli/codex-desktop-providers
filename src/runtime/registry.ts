@@ -1,19 +1,6 @@
 import { object, type JsonObject, type RegisteredModel } from "./types.js";
 
-/**
- * Profiles are native Codex config, not another credential store. Only model
- * tuning is copied: selecting a profile in the picker must not change security,
- * permissions, instructions, MCP servers, or other unrelated profile settings.
- */
-const MODEL_OPTIONS = [
-  "model_context_window",
-  "model_auto_compact_token_limit",
-  "model_reasoning_effort",
-  "model_reasoning_summary",
-  "model_verbosity",
-] as const;
-
-const EFFORT_ORDER = [
+const EFFORTS = new Set([
   "none",
   "minimal",
   "low",
@@ -22,141 +9,137 @@ const EFFORT_ORDER = [
   "xhigh",
   "max",
   "ultra",
-] as const;
-const EFFORTS = new Set<string>(EFFORT_ORDER);
+]);
+const LEGACY_OPTIONS = [
+  "model_name",
+  "model_reasoning_efforts",
+  "model_reasoning_effort",
+  "model_context_window",
+  "model_auto_compact_token_limit",
+  "model_reasoning_summary",
+  "model_verbosity",
+];
 
-/** Native config normalization drops extension metadata. Layers arrive in
- * highest-precedence-first order; only enabled, non-project layers can supply
- * metadata. Routing/auth still come from native effective config. */
-function profileMetadata(layers: unknown): Map<string, JsonObject> {
-  const metadata = new Map<string, JsonObject>();
-  if (!Array.isArray(layers)) return metadata;
-  for (const value of layers) {
-    const layer = object(value);
-    if (
-      !layer ||
-      layer.disabledReason != null ||
-      object(layer.name)?.type === "project"
-    )
-      continue;
-    const profiles = object(object(layer.config)?.profiles) ?? {};
-    for (const [name, value] of Object.entries(profiles)) {
-      const profile = object(value);
-      if (!profile) continue;
-      const entry = metadata.get(name) ?? {};
-      for (const key of ["model_name", "model_reasoning_efforts"]) {
-        if (Object.hasOwn(profile, key) && !Object.hasOwn(entry, key)) {
-          entry[key] = profile[key];
-        }
-      }
-      metadata.set(name, entry);
-    }
-  }
-  return metadata;
-}
-
-function reasoningEfforts(value: unknown, profile: string): string[] {
-  if (
-    !Array.isArray(value) ||
-    value.length === 0 ||
-    value.some((effort) => typeof effort !== "string" || !EFFORTS.has(effort))
-  ) {
-    throw new Error(
-      `[desktop-providers] model_reasoning_efforts in profile ${profile} must be a non-empty list of supported effort names`,
-    );
-  }
-  if (new Set(value).size !== value.length) {
-    throw new Error(
-      `[desktop-providers] Duplicate model_reasoning_efforts in profile ${profile}`,
-    );
-  }
-  return value as string[];
-}
-
-function modelName(value: unknown, profile: string): string | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== "string" || !value.trim()) {
-    throw new Error(
-      `[desktop-providers] model_name in profile ${profile} must be a non-empty string`,
-    );
-  }
-  return value.trim();
-}
-
+/** Native profiles only bind catalog model IDs to providers. All model metadata
+ * comes from the catalog already loaded by the native app-server. */
 export function readProfiles(
   config: JsonObject,
+  catalog: unknown[],
   layers?: unknown,
 ): Map<string, RegisteredModel> {
   const providers = object(config.model_providers) ?? {};
   const profiles = object(config.profiles) ?? {};
   const models = new Map<string, RegisteredModel>();
-  const metadata = profileMetadata(layers);
-
   for (const [name, value] of Object.entries(profiles).sort()) {
     const profile = object(value);
     if (
       typeof profile?.model !== "string" ||
       typeof profile.model_provider !== "string" ||
       profile.model_provider === "openai"
-    ) {
+    )
       continue;
-    }
-
+    const model = profile.model.trim();
+    if (!model || model !== profile.model)
+      throw new Error(
+        `[desktop-providers] Profile ${name} must use an exact non-empty catalog model ID`,
+      );
+    if (models.has(model))
+      throw new Error(
+        `[desktop-providers] Model ${model} is registered by multiple profiles; declare one profile per model`,
+      );
     const provider = object(providers[profile.model_provider]);
-    if (!provider) {
+    if (!provider)
       throw new Error(
         `[desktop-providers] Profile ${name} references an undefined provider: ${profile.model_provider}`,
       );
-    }
-    if (provider.wire_api !== "responses") {
+    if (provider.wire_api !== "responses")
       throw new Error(
         `[desktop-providers] Provider ${profile.model_provider} must use wire_api = "responses"; this patch does not translate API protocols`,
       );
-    }
-    const model = profile.model.trim();
-    if (!model) {
-      throw new Error(`[desktop-providers] Profile ${name} has an empty model`);
-    }
-    if (models.has(model)) {
+    if (config.model_provider != null && config.model_provider !== "openai")
       throw new Error(
-        `[desktop-providers] Model ${model} is registered by multiple profiles; declare one profile per model with model_reasoning_efforts`,
+        "[desktop-providers] Keep the global model_provider unset or openai; select external providers only for new chats",
       );
-    }
-    const extra = metadata.get(name);
-    const displayName = modelName(
-      profile.model_name ?? extra?.model_name,
-      name,
-    );
-    const declared = reasoningEfforts(
-      profile.model_reasoning_efforts ?? extra?.model_reasoning_efforts,
-      name,
-    );
-    const effort = profile.model_reasoning_effort ?? declared[0];
-    if (typeof effort !== "string" || !declared.includes(effort)) {
+    if (config.model === model)
       throw new Error(
-        `[desktop-providers] Default model_reasoning_effort in profile ${name} must be included in model_reasoning_efforts`,
+        `[desktop-providers] Keep an official model as the global default; ${model} is registered for an external provider`,
       );
-    }
-    const tuning: JsonObject = {};
-    for (const key of MODEL_OPTIONS) {
-      if (profile[key] !== undefined && profile[key] !== null) {
-        tuning[key] = profile[key];
+    if (
+      typeof config.model_catalog_json !== "string" ||
+      !config.model_catalog_json.trim()
+    )
+      throw new Error(
+        "[desktop-providers] Configure model_catalog_json at startup and restart the native app-server before using registered providers",
+      );
+    if (
+      profile.model_catalog_json != null &&
+      profile.model_catalog_json !== config.model_catalog_json
+    )
+      throw new Error(
+        `[desktop-providers] Profile ${name} selects a different model_catalog_json; per-thread catalogs are not supported, use the startup catalog`,
+      );
+    const sources = [profile];
+    if (Array.isArray(layers))
+      for (const value of layers) {
+        const layer = object(value);
+        if (
+          !layer ||
+          layer.disabledReason != null ||
+          object(layer.name)?.type === "project"
+        )
+          continue;
+        const raw = object(object(object(layer.config)?.profiles)?.[name]);
+        if (raw) sources.push(raw);
       }
-    }
-    // Never inherit an official model's ultra effort when starting this model.
-    tuning.model_reasoning_effort = effort;
+    for (const source of sources)
+      for (const key of LEGACY_OPTIONS)
+        if (source[key] != null)
+          throw new Error(
+            `[desktop-providers] Move ${key} from profile ${name} into model_catalog_json; profiles only select model and model_provider`,
+          );
+    const matches = catalog
+      .map(object)
+      .filter((entry) => entry?.model === model);
+    if (matches.length !== 1)
+      throw new Error(
+        `[desktop-providers] Expected exactly one native catalog entry for ${model}; found ${matches.length}. Check model_catalog_json and restart the native app-server`,
+      );
+    const metadata = matches[0]!;
+    const efforts = Array.isArray(metadata.supportedReasoningEfforts)
+      ? metadata.supportedReasoningEfforts.map(
+          (item) => object(item)?.reasoningEffort,
+        )
+      : [];
+    const effort = metadata.defaultReasoningEffort;
+    if (
+      !efforts.length ||
+      efforts.some(
+        (value) => typeof value !== "string" || !EFFORTS.has(value),
+      ) ||
+      new Set(efforts).size !== efforts.length ||
+      typeof effort !== "string" ||
+      !efforts.includes(effort)
+    )
+      throw new Error(
+        `[desktop-providers] Catalog model ${model} must declare supported reasoning efforts and a default included in that list`,
+      );
+    if (
+      typeof metadata.displayName !== "string" ||
+      !metadata.displayName.trim()
+    )
+      throw new Error(
+        `[desktop-providers] Catalog model ${model} must have a non-empty display name`,
+      );
     models.set(model, {
       profile: name,
       model,
-      ...(displayName === undefined ? {} : { modelName: displayName }),
       provider: profile.model_provider,
       providerName:
         typeof provider.name === "string"
           ? provider.name
           : profile.model_provider,
       effort,
-      efforts: EFFORT_ORDER.filter((value) => declared.includes(value)),
-      config: tuning,
+      efforts: efforts as string[],
     });
   }
   return models;
@@ -168,51 +151,32 @@ export function isRegisteredModel(value: unknown): boolean {
   return typeof object(value)?.[MARKER] === "string";
 }
 
-export function appendModels(
+/** Decorate existing catalog entries in place. Never append fabricated metadata
+ * or alter pagination, native entries, or their entitlement fields. */
+export function decorateModels(
   response: JsonObject,
   models: Map<string, RegisteredModel>,
-  params?: JsonObject | null,
 ): JsonObject {
   if (!Array.isArray(response.data)) return response;
-  // Detect collisions on every native page, not only the appended final page.
-  for (const value of response.data) {
-    const id = object(value)?.model;
-    if (typeof id === "string" && models.has(id)) {
-      throw new Error(
-        `[desktop-providers] Model ${id} also occurs in the native catalog; ambiguous provider routing is not supported`,
-      );
-    }
-  }
-  // Append once, on the final native page. Keep native pagination unchanged.
-  if (response.nextCursor != null) return response;
-  const additions = [...models.values()].map((entry) => {
-    return {
-      id: entry.model,
-      model: entry.model,
-      displayName: `${entry.modelName ?? entry.model} (${entry.providerName})`,
-      description: `${entry.modelName ?? entry.model} via ${entry.providerName}`,
-      hidden: false,
-      isDefault: false,
-      supportsPersonality: false,
-      // Conservative picker metadata; inference capabilities remain the native
-      // backend/provider's responsibility, not an invented copy of GPT metadata.
-      inputModalities: ["text"],
-      supportedReasoningEfforts: entry.efforts.map((reasoningEffort) => ({
-        reasoningEffort,
-        description: `${reasoningEffort} effort`,
-      })),
-      defaultReasoningEffort: entry.effort,
-      upgrade: null,
-      [MARKER]: entry.provider,
-    };
-  });
-  // params is accepted to keep this function aligned with the request contract.
-  void params;
-  return { ...response, data: [...response.data, ...additions] };
+  return {
+    ...response,
+    data: response.data.map((value) => {
+      const metadata = object(value);
+      const entry = models.get(String(metadata?.model));
+      return entry
+        ? {
+            ...metadata,
+            displayName: `${metadata!.displayName} (${entry.providerName})`,
+            isDefault: false,
+            [MARKER]: entry.provider,
+          }
+        : value;
+    }),
+  };
 }
 
 /** Native account-level effort toggles apply to native models. For explicitly
- * registered models the native profile declarations are the capability list. */
+ * registered models the native catalog declarations are the capability list. */
 export function restorePickerEfforts(
   result: JsonObject,
   catalog: unknown[],
