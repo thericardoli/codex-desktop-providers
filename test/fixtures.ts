@@ -16,3 +16,11 @@ export const picker = `export function visible({ model: selected, availableModel
 export function select({ models: catalog, enabledReasoningEfforts, defaultModel }) {
   return { models: catalog.map(model => ({...model, supportedReasoningEfforts: model.supportedReasoningEfforts.filter(e => enabledReasoningEfforts.has(e.reasoningEffort))})), defaultModel: null };
 }`;
+
+export const nestedPicker = `export function select({ models: catalog, enabledReasoningEfforts, defaultModel, availableModels, hasConfiguredModelCatalog, useHiddenModels, apiKeyDaybreakSupported }) {
+  const visible = catalog.filter(model => function({ model: selected, availableModels, useHiddenModels, hasConfiguredModelCatalog, apiKeyDaybreakSupported }) {
+    let programs = selected.availableAccessPrograms?.cyber;
+    return (hasConfiguredModelCatalog || availableModels.has(selected.model)) && !selected.hidden && !programs;
+  }({ model, availableModels, useHiddenModels, hasConfiguredModelCatalog, apiKeyDaybreakSupported }));
+  return { models: visible.map(model => ({...model, supportedReasoningEfforts: model.supportedReasoningEfforts.filter(e => enabledReasoningEfforts.has(e.reasoningEffort))})), defaultModel: null };
+}`;

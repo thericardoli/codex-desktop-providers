@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { applyPatch, planPatch } from "../src/patch/patch.js";
 import { MANIFEST_PATH, RUNTIME_DIRECTORY } from "../src/patch/constants.js";
 import { readText, rewriteArchive, sha256 } from "../src/patch/archive.js";
-import { shared, picker } from "./fixtures.js";
+import { shared, picker, nestedPicker } from "./fixtures.js";
 
 const runtime = fileURLToPath(new URL("../src/runtime", import.meta.url));
 const sharedPath = "webview/assets/renamed-client-abc123.js";
@@ -124,6 +124,26 @@ test("discover patch points split across three modules", async () => {
       );
     },
     "future",
+  );
+});
+
+test("patch and verify an anonymous filter nested inside the effort selector", async () => {
+  await fixture(
+    { [sharedPath]: shared, [pickerPath]: nestedPicker },
+    async (archive) => {
+      const before = sha256(await readFile(archive));
+      const plan = await planPatch(archive, runtime);
+      assert.equal(plan.status, "ready");
+      assert.equal(sha256(await readFile(archive)), before);
+      const patched = plan.changes.get(pickerPath)!.toString();
+      assert.match(patched, /restorePickerEfforts/);
+      assert.match(patched, /isRegisteredModel\(selected\)/);
+      await applyPatch(archive, plan);
+      assert.equal(
+        (await planPatch(archive, runtime)).status,
+        "already-patched",
+      );
+    },
   );
 });
 

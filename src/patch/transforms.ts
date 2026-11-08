@@ -3,6 +3,7 @@ import {
   type Node,
   type MethodDefinition,
   type FunctionDeclaration,
+  type FunctionExpression,
   type Identifier,
 } from "acorn";
 import { full } from "acorn-walk";
@@ -20,11 +21,15 @@ export const PATCH_POINTS = [
 ] as const;
 export type PatchPoint = (typeof PATCH_POINTS)[number];
 
-export interface PatchEdit {
-  point: PatchPoint;
+interface SourceEdit {
   start: number;
   end: number;
   replacement: string;
+}
+
+export interface PatchEdit {
+  point: PatchPoint;
+  edits: SourceEdit[];
 }
 
 function ast(source: string) {
@@ -70,9 +75,13 @@ export function findPatchEdits(source: string): PatchEdit[] {
       const replace = (point: PatchPoint, replacement: string) =>
         edits.push({
           point,
-          start: method.value.body!.start + 1,
-          end: method.value.body!.end - 1,
-          replacement,
+          edits: [
+            {
+              start: method.value.body!.start + 1,
+              end: method.value.body!.end - 1,
+              replacement,
+            },
+          ],
         });
       if (
         name === "sendRequest" &&
@@ -110,8 +119,12 @@ export function findPatchEdits(source: string): PatchEdit[] {
         );
       }
     }
-    if (node.type !== "FunctionDeclaration") return;
-    const fn = node as FunctionDeclaration;
+    if (
+      node.type !== "FunctionDeclaration" &&
+      node.type !== "FunctionExpression"
+    )
+      return;
+    const fn = node as FunctionDeclaration | FunctionExpression;
     const param = fn.params[0];
     if (param?.type !== "ObjectPattern") return;
     const properties = param.properties;
@@ -141,9 +154,20 @@ export function findPatchEdits(source: string): PatchEdit[] {
     ) {
       edits.push({
         point: "efforts",
-        start: fn.body.start + 1,
-        end: fn.body.end - 1,
-        replacement: `return ${BINDING}.restorePickerEfforts((()=>{${body}})(),${boundName("models")});`,
+        // Keep the original body in place so an inlined visibility predicate
+        // can be patched independently without overlapping replacements.
+        edits: [
+          {
+            start: fn.body.start + 1,
+            end: fn.body.start + 1,
+            replacement: `return ${BINDING}.restorePickerEfforts((()=>{`,
+          },
+          {
+            start: fn.body.end - 1,
+            end: fn.body.end - 1,
+            replacement: `})(),${boundName("models")});`,
+          },
+        ],
       });
     }
     // Only the visibility predicate inspects the single model's access programs.
@@ -164,9 +188,13 @@ export function findPatchEdits(source: string): PatchEdit[] {
       const configuredCatalog = boundName("hasConfiguredModelCatalog");
       edits.push({
         point: "visibility",
-        start: fn.body.start + 1,
-        end: fn.body.start + 1,
-        replacement: `if(${BINDING}.isRegisteredModel(${model}))return !${model}.hidden;${configuredCatalog}=false;`,
+        edits: [
+          {
+            start: fn.body.start + 1,
+            end: fn.body.start + 1,
+            replacement: `if(${BINDING}.isRegisteredModel(${model}))return !${model}.hidden;${configuredCatalog}=false;`,
+          },
+        ],
       });
     }
   });
@@ -180,7 +208,9 @@ export function applyEdits(
 ): string {
   if (source.includes(BINDING))
     throw new Error("Asset already contains the patch binding");
-  const sorted = [...edits].sort((a, b) => a.start - b.start);
+  const sorted = edits
+    .flatMap((edit) => edit.edits)
+    .sort((a, b) => a.start - b.start);
   for (let i = 1; i < sorted.length; i++) {
     if (sorted[i - 1]!.end > sorted[i]!.start)
       throw new Error("Overlapping upstream patch points");

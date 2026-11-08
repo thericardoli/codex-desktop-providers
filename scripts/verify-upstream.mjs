@@ -137,15 +137,36 @@ for (const picker of sources)
   full(
     parse(picker, { ecmaVersion: "latest", sourceType: "module" }),
     (node) => {
-      if (node.type !== "FunctionDeclaration") return;
+      if (
+        node.type !== "FunctionDeclaration" &&
+        node.type !== "FunctionExpression"
+      )
+        return;
       const source = picker.slice(node.start, node.end);
-      if (source.includes("__codexDesktopProviders.isRegisteredModel(")) {
+      const first = node.body.body[0];
+      const call =
+        first?.type === "IfStatement"
+          ? first.test
+          : first?.type === "ReturnStatement"
+            ? first.argument
+            : undefined;
+      if (
+        call?.type !== "CallExpression" ||
+        call.callee.type !== "MemberExpression" ||
+        call.callee.object.type !== "Identifier" ||
+        call.callee.object.name !== "__codexDesktopProviders" ||
+        call.callee.property.type !== "Identifier"
+      )
+        return;
+      if (call.callee.property.name === "isRegisteredModel") {
         assert.equal(filterSource, undefined);
         filterSource = source;
-        filterName = node.id.name;
+        filterName = node.id?.name;
       }
-      if (source.includes("__codexDesktopProviders.restorePickerEfforts("))
+      if (call.callee.property.name === "restorePickerEfforts") {
+        assert.equal(selectorSource, undefined);
         selectorSource = source;
+      }
     },
   );
 assert.ok(filterSource);
@@ -173,24 +194,51 @@ assert.equal(
 assert.equal(visible({ ...options, model: list.data[1] }), true);
 assert.ok(selectorSource);
 const effortPredicates = new Set();
+const effortModules = new Map();
 full(parse(`(${selectorSource})`, { ecmaVersion: "latest" }), (node) => {
   if (
     node.type === "LogicalExpression" &&
     node.operator === "&&" &&
     node.left.type === "CallExpression" &&
-    node.left.callee.type === "Identifier" &&
     node.left.arguments.length === 1 &&
     node.left.arguments[0].type === "Identifier"
-  )
-    effortPredicates.add(node.left.callee.name);
+  ) {
+    const call = node.left.callee;
+    const callee =
+      call.type === "SequenceExpression" ? call.expressions.at(-1) : call;
+    if (callee.type === "Identifier") effortPredicates.add(callee.name);
+    else if (
+      callee.type === "MemberExpression" &&
+      callee.object.type === "Identifier" &&
+      !callee.computed &&
+      callee.property.type === "Identifier"
+    ) {
+      const helpers = effortModules.get(callee.object.name) ?? {};
+      helpers[callee.property.name] = () => true;
+      effortModules.set(callee.object.name, helpers);
+    }
+  }
 });
-assert.equal(effortPredicates.size, 1);
+assert.equal(
+  effortPredicates.size +
+    [...effortModules.values()].reduce(
+      (count, helpers) => count + Object.keys(helpers).length,
+      0,
+    ),
+  1,
+);
 const select = Function(
   "__codexDesktopProviders",
-  filterName,
+  ...(filterName ? [filterName] : []),
   ...effortPredicates,
+  ...effortModules.keys(),
   `return (${selectorSource})`,
-)(runtime, visible, ...[...effortPredicates].map(() => () => true));
+)(
+  runtime,
+  ...(filterName ? [visible] : []),
+  ...[...effortPredicates].map(() => () => true),
+  ...effortModules.values(),
+);
 const native = {
   ...list.data[0],
   supportedReasoningEfforts: [

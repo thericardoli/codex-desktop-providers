@@ -8,6 +8,9 @@
    default-selection, visibility, and effort-selection boundaries. Confirm the
    native provider fields and response contracts still have their expected
    meanings. Update `src/patch/transforms.ts` with synthetic regression fixtures.
+   Keep one logical match per patch point even when it needs multiple source
+   edits. Prefer boundary insertions for wrappers that contain other patch
+   targets; overlapping source replacements must still fail before writing.
 3. Run type checking, tests, formatting, and the package build. Apply the patch
    to a disposable archive and repeat `check` to verify integrity and idempotence.
 4. Test native and third-party models in separate chats, follow-up turns,

@@ -10,16 +10,27 @@ point must occur exactly once across the entire candidate set. The points may
 move between files, combine into one module, or split across modules. Injected
 runtime imports are relative to each discovered module's directory.
 
+Both declared functions and function expressions are matched structurally. A
+bundler may inline the model visibility predicate inside the effort selector;
+the selector wrapper uses separate boundary insertions so both targets remain
+independently checked without replacing or hiding the nested predicate.
+
 Matching code structure is the compatibility criterion. Missing, ambiguous,
 malformed, or overlapping targets fail before the archive is modified. Changes
 to the native request contracts may still require runtime updates; unrestricted
 version eligibility is not evidence that untested code layouts or native APIs
 work. No check is bypassed by pretending an unknown version is a tested version.
 
-| Desktop version | Platform     | Evidence                                                                                      |
-| --------------- | ------------ | --------------------------------------------------------------------------------------------- |
-| 26.1007.71326   | Linux x86_64 | Actual structural patch and catalog-aware method tests                                        |
-| 26.1021.22027   | Linux x86_64 | Actual structural patch/method tests; native catalog window, compaction and resume/fork smoke |
+| Desktop version | Platform     | Evidence                                                                                                   |
+| --------------- | ------------ | ---------------------------------------------------------------------------------------------------------- |
+| 26.1007.71326   | Linux x86_64 | Actual structural patch and catalog-aware method tests                                                     |
+| 26.1021.22027   | Linux x86_64 | Actual structural patch/method tests; native catalog window, compaction and resume/fork smoke              |
+| 26.1103.32239   | Linux x86_64 | Actual archive patch, integrity/idempotence checks and method tests with nested anonymous picker functions |
+
+The 26.1103.32239 validation uses a disposable official archive and exercises
+native visibility/effort filtering, external model routing, prewarming and default
+selection without launching Electron or authenticating. Interactive inference,
+tool calls and restart/resume have not been revalidated for this version.
 
 `nix/upstream.json` pins the official download used by CI. It is an integration
 test fixture, not runtime compatibility data. Consumers independently select

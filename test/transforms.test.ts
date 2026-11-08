@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isRegisteredModel } from "../src/runtime/registry.js";
+import {
+  isRegisteredModel,
+  restorePickerEfforts,
+} from "../src/runtime/registry.js";
 import { transformPicker, transformShared } from "../src/patch/transforms.js";
 
-import { shared, picker } from "./fixtures.js";
+import { shared, picker, nestedPicker } from "./fixtures.js";
 
 test("wrap structurally matched request, prewarm, and default paths", () => {
   const result = transformShared(shared);
@@ -18,6 +21,59 @@ test("match the model filter by semantic properties, not minified names", () => 
   assert.match(result, /isRegisteredModel\(selected\)/);
   assert.match(result, /availableModels.has\(selected.model\)/);
   assert.match(result, /restorePickerEfforts/);
+});
+
+test("match a standalone anonymous model filter", () => {
+  const anonymous = picker.replace(
+    "export function visible(",
+    "const visible = function(",
+  );
+  assert.match(transformPicker(anonymous), /isRegisteredModel\(selected\)/);
+});
+
+test("patch a nested anonymous filter while preserving native visibility and effort checks", () => {
+  const patched = transformPicker(nestedPicker);
+  const select = Function(
+    "__codexDesktopProviders",
+    `return (${patched.slice(patched.indexOf("export function select")).replace("export ", "")});`,
+  )({ isRegisteredModel, restorePickerEfforts });
+  const efforts = ["low", "high"].map((reasoningEffort) => ({
+    reasoningEffort,
+  }));
+  const official = {
+    model: "official",
+    hidden: false,
+    supportedReasoningEfforts: efforts,
+  };
+  const external = {
+    ...official,
+    model: "external",
+    codexDesktopProvider: "custom",
+  };
+  const options = {
+    models: [
+      official,
+      { ...official, model: "unavailable" },
+      external,
+      { ...external, model: "hidden-external", hidden: true },
+    ],
+    availableModels: new Set(["official"]),
+    hasConfiguredModelCatalog: true,
+    enabledReasoningEfforts: new Set(["high"]),
+  };
+  const result = select(options);
+  assert.deepEqual(
+    result.models.map((model: { model: string }) => model.model),
+    ["official", "external"],
+  );
+  assert.deepEqual(result.models[0].supportedReasoningEfforts, [efforts[1]]);
+  assert.deepEqual(result.models[1].supportedReasoningEfforts, efforts);
+  assert.deepEqual(
+    select({ ...options, availableModels: new Set() }).models.map(
+      (model: { model: string }) => model.model,
+    ),
+    ["external"],
+  );
 });
 
 test("a static catalog never bypasses native official-model availability checks", () => {
