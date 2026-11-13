@@ -102,6 +102,14 @@ links into the copy. Escaping links and credential files are rejected. Source
 identity/size/time inventories are compared around copying and patching to detect
 updates. Read-only source ASARs become writable only in the copy.
 
+`unpacked.ts` snapshots the actual ASAR-listed unpacked payload before copying.
+Present files are streamed through SHA-256; source/header size differences and
+pre-existing `ENOENT` entries are diagnostic data, not inferred runtime failures.
+The copy must preserve both present bytes and absent entries. Access errors,
+invalid types, newly missing files and changed hashes fail; neither binaries nor
+ASAR metadata are synthesized to hide source discrepancies. The result lists
+those discrepancies in `sourceUnpackedIssues` and retains `runtimeValidation`.
+
 The staged archive uses the same atomic writer and independent ASAR reader.
 `windows-executable.ts` bounds-checks PE section/resource offsets and locates the
 Electron V1 fuse wire plus `INTEGRITY/ELECTRONASAR` resource. It replaces only an

@@ -257,6 +257,16 @@ login and inference still need real Windows validation. `status: prepared` repor
 verified files, and `runtimeValidation: not-performed` explicitly records that the
 application was not started. See [Windows findings](docs/compatibility.md#windows-storemsix).
 
+Version **0.6.3** fixes an additional **0.6.2** preparation error: an ASAR can list
+unpacked native build outputs that are absent from the installed payload. The
+tool now preserves those pre-existing absences and reports them in
+`sourceUnpackedIssues`, together with any source/header size differences. Existing
+unpacked files are verified against the source bytes using SHA-256; newly missing,
+changed or unreadable files still fail. No replacement binaries are downloaded,
+generated or substituted, and the ASAR metadata is retained. These diagnostics do
+not establish whether the application needs a missing file at runtime. Upgrade
+to 0.6.3 or later if 0.6.2 reports missing or invalid unpacked application files.
+
 ## Build and check
 
 Node.js 22 or newer is required. All dependencies are pinned in `package-lock.json`.

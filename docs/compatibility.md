@@ -68,6 +68,30 @@ files, links, output isolation, digest synchronization and failure cleanup. The
 native release-package smoke driver also exercises this command on all six
 platform targets. These tests do not launch a real Windows Desktop app.
 
+### Existing unpacked-file discrepancies (0.6.2 follow-up)
+
+A follow-up reported `prepare-windows` failing on
+`node_modules/@worklouder/device-kit-oai/node_modules/@serialport/bindings-cpp/build/Release/bindings.node`.
+The installed app was not modified. The follow-up did not provide a fresh app
+version or filesystem inventory, so this does not establish that the module is
+required, optional, or missing rather than unreadable in that installation.
+
+Version 0.6.2 incorrectly required every ASAR-listed unpacked file to exist and
+match the header's size. It also collapsed filesystem errors into "missing or
+invalid". An archive entry alone is not a runtime dependency check: for example,
+[`node-gyp-build`](https://github.com/prebuild/node-gyp-build/blob/master/node-gyp-build.js)
+can select a platform prebuild when `build/Release` is absent. This is a possible
+explanation, not evidence about the reported app's actual module resolution.
+
+Version 0.6.3 compares the staged unpacked files with a snapshot of the
+source filesystem instead. Pre-existing missing entries and size discrepancies
+are retained and listed in `sourceUnpackedIssues`; native file bytes and archive
+metadata are not repaired or fabricated. All present unpacked files must keep
+their source size and SHA-256 digest in the copy. A newly missing, changed or
+invented file fails verification. Only `ENOENT` denotes absence; permission
+errors and invalid file types still fail explicitly. Preparation still makes no
+claim about successful GUI startup or runtime use of any missing entry.
+
 ## Validated Desktop archives
 
 | Desktop version | Platform     | Evidence                                                                                                   |

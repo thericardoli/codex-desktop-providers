@@ -28,6 +28,11 @@ import { sha256 } from "./archive.js";
 import { applyPatch, planPatch } from "./patch.js";
 import { isWindowsAppsPath } from "./target.js";
 import {
+  snapshotUnpackedFiles,
+  unpackedSourceIssues,
+  verifyUnpackedCopy,
+} from "./unpacked.js";
+import {
   inspectWindowsIntegrity,
   updateWindowsIntegrity,
 } from "./windows-executable.js";
@@ -123,30 +128,6 @@ function headerHash(archive: string): string {
   return sha256(getRawHeader(archive).headerString);
 }
 
-async function verifyUnpackedFiles(archive: string): Promise<void> {
-  const header = getRawHeader(archive).header;
-  async function visit(
-    entry:
-      | typeof header
-      | { files?: Record<string, unknown>; unpacked?: boolean; size?: number },
-    path: string,
-  ): Promise<void> {
-    if ("files" in entry && entry.files) {
-      for (const [name, child] of Object.entries(entry.files))
-        await visit(child as typeof entry, join(path, name));
-    } else if ("unpacked" in entry && entry.unpacked) {
-      const file = await stat(join(archive + ".unpacked", path)).catch(
-        () => null,
-      );
-      if (!file?.isFile() || file.size !== entry.size)
-        throw new Error(
-          `Missing or invalid unpacked application file: ${path}`,
-        );
-    }
-  }
-  await visit(header, "");
-}
-
 /**
  * Build a self-contained application copy. Only the explicitly selected app's
  * directory is read; no package registration, credentials or user state migrate.
@@ -215,7 +196,8 @@ export async function prepareWindows(
   const before = await inventory(source);
   const plan = await planPatch(archive, runtime);
   const originalHeader = headerHash(archive);
-  await verifyUnpackedFiles(archive);
+  const unpacked = await snapshotUnpackedFiles(archive);
+  const sourceUnpackedIssues = unpackedSourceIssues(unpacked);
   const binary = await readFile(executable);
   inspectWindowsIntegrity(binary, originalHeader);
 
@@ -263,7 +245,7 @@ export async function prepareWindows(
     const verified = await planPatch(copiedArchive, runtime);
     if (verified.status !== "already-patched")
       throw new Error("Prepared archive verification failed");
-    await verifyUnpackedFiles(copiedArchive);
+    await verifyUnpackedCopy(copiedArchive, unpacked);
     if (JSON.stringify(await inventory(source)) !== JSON.stringify(before))
       throw new Error(
         "Source application changed during preparation; retry with a stable source",
@@ -282,9 +264,15 @@ export async function prepareWindows(
           ? "invalidated-in-copy"
           : "unchanged",
       runtimeValidation: "not-performed",
+      sourceUnpackedIssues,
       notes: [
         "Start the returned app path after fully quitting the installed application. Store shortcuts still launch the installed copy.",
         "This copy is not registered as an MSIX package. Package-identity-dependent features and native login must be tested on Windows.",
+        ...(sourceUnpackedIssues.length
+          ? [
+              `${sourceUnpackedIssues.length} unpacked entries already differ from the source ASAR metadata; see sourceUnpackedIssues. The copy preserves the source state. Startup and affected functionality have not been verified.`,
+            ]
+          : []),
         ...(updated.modified && updated.signed
           ? [
               "Updating the embedded ASAR digest invalidates this copy's publisher signature; Windows policies requiring signed executables may block it.",

@@ -26,6 +26,10 @@ import { prepareWindows } from "../src/patch/prepare-windows.js";
 import { planPatch } from "../src/patch/patch.js";
 import { isWindowsAppsPath } from "../src/patch/target.js";
 import { inspectWindowsIntegrity } from "../src/patch/windows-executable.js";
+import {
+  snapshotUnpackedFiles,
+  verifyUnpackedCopy,
+} from "../src/patch/unpacked.js";
 import { shared, picker } from "./fixtures.js";
 import { windowsExecutable } from "./windows-fixtures.js";
 
@@ -40,6 +44,7 @@ async function fixture(
     archive: string;
     output: string;
   }) => Promise<void>,
+  extraUnpacked: Record<string, string> = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), "providers Windows copy "));
   const source = join(root, "installed app");
@@ -55,8 +60,14 @@ async function fixture(
     );
     await writeFile(join(assets, "webview", "client.js"), shared);
     await writeFile(join(assets, "webview", "picker.js"), picker);
-    await writeFile(join(assets, "native.node"), "native payload");
-    await createPackageWithOptions(assets, archive, { unpack: "*.node" });
+    for (const [path, bytes] of Object.entries({
+      "native.node": "native payload",
+      ...extraUnpacked,
+    })) {
+      await mkdir(dirname(join(assets, path)), { recursive: true });
+      await writeFile(join(assets, path), bytes);
+    }
+    await createPackageWithOptions(assets, archive, { unpack: "**/*.node" });
     await writeFile(
       app,
       windowsExecutable(sha256(getRawHeader(archive).headerString), {
@@ -89,6 +100,7 @@ test("prepare a complete copy from read-only files, synchronize integrity, and r
     assert.equal(result.embeddedAsarIntegrity, "enabled");
     assert.equal(result.authenticode, "invalidated-in-copy");
     assert.equal(result.runtimeValidation, "not-performed");
+    assert.deepEqual(result.sourceUnpackedIssues, []);
     assert.equal(
       (await planPatch(result.asar, runtime)).status,
       "already-patched",
@@ -200,12 +212,142 @@ test("reject credential files before copying application contents", async () => 
   });
 });
 
-test("reject incomplete unpacked native resources before creating a prepared app", async () => {
+test("report existing missing unpacked entries while preserving the source and its metadata", async () => {
   await fixture(async ({ app, archive, output }) => {
     await rm(join(archive + ".unpacked", "native.node"));
+    const original = await readFile(archive);
+    const metadata = statFile(archive, "native.node");
+    const result = await prepareWindows(app, output, runtime);
+    assert.equal(result.status, "prepared");
+    assert.equal(result.runtimeValidation, "not-performed");
+    assert.deepEqual(result.sourceUnpackedIssues, [
+      {
+        path: "native.node",
+        issue: "missing",
+        expectedSize: 14,
+        actualSize: null,
+      },
+    ]);
+    assert.match(result.notes.join("\n"), /sourceUnpackedIssues/);
+    assert.equal(
+      await lstat(join(result.asar + ".unpacked", "native.node")).catch(
+        () => null,
+      ),
+      null,
+    );
+    assert.deepEqual(statFile(result.asar, "native.node"), metadata);
+    assert.deepEqual(await readFile(archive), original);
+  });
+});
+
+test("prepare the reported missing serialport build layout while retaining its available platform prebuild", async () => {
+  const module =
+    "node_modules/@worklouder/device-kit-oai/node_modules/@serialport/bindings-cpp";
+  const missing = `${module}/build/Release/bindings.node`;
+  const prebuilt = `${module}/prebuilds/win32-x64/node.napi.node`;
+  await fixture(
+    async ({ app, archive, output }) => {
+      await rm(join(archive + ".unpacked", missing));
+      const result = await prepareWindows(app, output, runtime);
+      assert.equal(result.status, "prepared");
+      assert.deepEqual(
+        result.sourceUnpackedIssues.map(({ path, issue }) => ({ path, issue })),
+        [{ path: missing, issue: "missing" }],
+      );
+      assert.equal(
+        await readFile(join(result.asar + ".unpacked", prebuilt), "utf8"),
+        "synthetic platform prebuild",
+      );
+      assert.equal(
+        await lstat(join(result.asar + ".unpacked", missing)).catch(() => null),
+        null,
+      );
+    },
+    {
+      [missing]: "synthetic build output",
+      [prebuilt]: "synthetic platform prebuild",
+    },
+  );
+});
+
+test("preserve and report source unpacked sizes that differ from archive metadata", async () => {
+  await fixture(async ({ app, archive, output }) => {
+    const bytes = "synthetic post-packaging native bytes";
+    await writeFile(join(archive + ".unpacked", "native.node"), bytes);
+    const metadata = statFile(archive, "native.node");
+    const result = await prepareWindows(app, output, runtime);
+    assert.deepEqual(result.sourceUnpackedIssues, [
+      {
+        path: "native.node",
+        issue: "size-mismatch",
+        expectedSize: 14,
+        actualSize: Buffer.byteLength(bytes),
+      },
+    ]);
+    assert.equal(
+      await readFile(join(result.asar + ".unpacked", "native.node"), "utf8"),
+      bytes,
+    );
+    assert.deepEqual(statFile(result.asar, "native.node"), metadata);
+  });
+});
+
+test("reject new missing files, same-size corruption and invented files in the copied unpacked tree", async () => {
+  await fixture(async ({ app, archive, output }) => {
+    const expected = await snapshotUnpackedFiles(archive);
+    const result = await prepareWindows(app, output, runtime);
+    const native = join(result.asar + ".unpacked", "native.node");
+    await verifyUnpackedCopy(result.asar, expected);
+    await writeFile(native, "NATIVE PAYLOAD");
+    assert.equal(Buffer.byteLength("NATIVE PAYLOAD"), 14);
+    await assert.rejects(
+      verifyUnpackedCopy(result.asar, expected),
+      /differs from source: native.node/,
+    );
+    await rm(native);
+    await assert.rejects(
+      verifyUnpackedCopy(result.asar, expected),
+      /differs from source: native.node/,
+    );
+    const missing = await snapshotUnpackedFiles(result.asar);
+    await writeFile(native, "native payload");
+    await assert.rejects(
+      verifyUnpackedCopy(result.asar, missing),
+      /differs from source: native.node/,
+    );
+  });
+});
+
+test(
+  "fail on an unreadable existing unpacked file instead of reporting it missing",
+  {
+    skip: process.platform === "win32" || process.getuid?.() === 0,
+  },
+  async () => {
+    await fixture(async ({ app, archive, output }) => {
+      const file = join(archive + ".unpacked", "native.node");
+      await chmod(file, 0);
+      try {
+        await assert.rejects(
+          prepareWindows(app, output, runtime),
+          /Cannot read unpacked application file native.node: EACCES/,
+        );
+        assert.equal(await lstat(output).catch(() => null), null);
+      } finally {
+        await chmod(file, 0o644);
+      }
+    });
+  },
+);
+
+test("fail on a directory occupying an unpacked file path", async () => {
+  await fixture(async ({ app, archive, output }) => {
+    const file = join(archive + ".unpacked", "native.node");
+    await rm(file);
+    await mkdir(file);
     await assert.rejects(
       prepareWindows(app, output, runtime),
-      /unpacked application file/,
+      /not a regular file|Cannot read unpacked application file/,
     );
     assert.equal(await lstat(output).catch(() => null), null);
   });

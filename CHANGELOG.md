@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.3
+
+- Prepare Windows copies with pre-existing absent or size-mismatched unpacked
+  entries, reporting `sourceUnpackedIssues` instead of treating every ASAR entry
+  as a required runtime file. Preserve existing bytes and unpacked metadata.
+- Verify unpacked copy contents against source SHA-256 digests; retain failures
+  for new missing/corrupt files, invalid file types and filesystem access errors.
+
 ## 0.6.2
 
 - Add `prepare-windows --app EXE --output NEW_DIRECTORY` to build a verified,

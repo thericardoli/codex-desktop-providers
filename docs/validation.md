@@ -198,6 +198,29 @@ for the reported app version. An updated signed EXE loses its valid publisher
 signature in the copy; organization policies may block that copy. No Windows
 runner or live Release was invoked during this local validation.
 
+## Unpacked source discrepancies (0.6.3, 2026-11-13)
+
+The 0.6.2 follow-up reported a preparation failure for
+`node_modules/@worklouder/device-kit-oai/node_modules/@serialport/bindings-cpp/build/Release/bindings.node`.
+No additional app version or source filesystem inventory was supplied. The old
+preflight treated missing files, size mismatches and access errors alike, so the
+report does not prove that the original application lacks a required dependency.
+
+The new preflight records actual unpacked file sizes and SHA-256 digests. Existing
+absences and header-size differences are reported as `sourceUnpackedIssues` and
+preserved in the copy. File reads that fail with permission errors, invalid file
+types and newly missing or changed copy contents still fail. No path-specific
+exception, dependency download, substitute native module or header repair is used.
+
+Type checking, **73 synthetic tests**, build and formatting passed locally. Tests
+include the exact reported nested module path alongside a synthetic platform
+prebuild, absent entries without a prebuild, differing header/filesystem sizes,
+same-size byte corruption, loss of a present file, fabrication of an absent file,
+unreadable sources, invalid file types and preservation of unpacked ASAR metadata.
+The release-package smoke driver now also covers an absent build output plus a
+present platform prebuild. These fixtures test faithful preparation, not whether
+the real reported Windows application can start or use its hardware module.
+
 ## Context-window probe (2026-11-08)
 
 An isolated probe used the backend bundled with Linux Desktop **26.1021.22027**

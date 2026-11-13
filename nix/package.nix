@@ -28,7 +28,7 @@ buildNpmPackage {
       ]);
   };
 
-  npmDepsHash = "sha256-6wK7xgfrVw6Hhkh2C4gaP/8T5xjPc8vNlIT/dOC8D6o=";
+  npmDepsHash = "sha256-LnEe02+fF8Na7ehAx+1XuWzdAm9i8cIgrOhePz/KiGY=";
   npmBuildScript = "build";
   doCheck = true;
   checkPhase = ''

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-  copyFile,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -133,9 +133,25 @@ try {
   await mkdir(join(windowsApp, "resources"), { recursive: true });
   const windowsArchive = join(windowsApp, "resources", "app.asar");
   const windowsExe = join(windowsApp, "Desktop.exe");
-  await copyFile(archive, windowsArchive);
+  const missing = "node_modules/synthetic-addon/build/Release/bindings.node";
+  const prebuilt =
+    "node_modules/synthetic-addon/prebuilds/win32-x64/node.napi.node";
+  await mkdir(join(source, "node_modules/synthetic-addon/build/Release"), {
+    recursive: true,
+  });
+  await mkdir(
+    join(source, "node_modules/synthetic-addon/prebuilds/win32-x64"),
+    { recursive: true },
+  );
+  await writeFile(join(source, missing), "synthetic build artifact");
+  await writeFile(join(source, prebuilt), "synthetic platform prebuild");
+  await asar.createPackageWithOptions(source, windowsArchive, {
+    unpack: "**/*.node",
+  });
+  await rm(join(windowsArchive + ".unpacked", missing));
+  const originalWindowsArchive = sha256(await readFile(windowsArchive));
   const executableBytes = windowsExecutable(
-    sha256(asar.getRawHeader(archive).headerString),
+    sha256(asar.getRawHeader(windowsArchive).headerString),
   );
   await writeFile(windowsExe, executableBytes);
   await writeFile(join(windowsApp, "native.dll"), "unmodified synthetic DLL");
@@ -154,7 +170,23 @@ try {
     JSON.parse(run(["check", "--asar", prepared.asar])).status,
     "already-patched",
   );
-  assert.equal(sha256(await readFile(windowsArchive)), original);
+  assert.equal(sha256(await readFile(windowsArchive)), originalWindowsArchive);
+  assert.deepEqual(
+    prepared.sourceUnpackedIssues.map(({ path, issue }) => ({ path, issue })),
+    [{ path: missing, issue: "missing" }],
+  );
+  assert.equal(
+    await readFile(join(prepared.asar + ".unpacked", prebuilt), "utf8"),
+    "synthetic platform prebuild",
+  );
+  assert.equal(
+    await lstat(join(prepared.asar + ".unpacked", missing)).catch(() => null),
+    null,
+  );
+  assert.deepEqual(
+    asar.statFile(prepared.asar, join(...missing.split("/"))),
+    asar.statFile(windowsArchive, join(...missing.split("/"))),
+  );
   assert.deepEqual(await readFile(windowsExe), executableBytes);
   assert.ok(
     (await readFile(prepared.app)).includes(
