@@ -2,12 +2,20 @@
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { shared, picker } from "../test/fixtures.ts";
+import { windowsExecutable } from "../test/windows-fixtures.ts";
 
 const { values } = parseArgs({
   options: {
@@ -121,6 +129,45 @@ try {
     original,
     "check must not write",
   );
+  const windowsApp = join(temporary, "synthetic Windows app");
+  await mkdir(join(windowsApp, "resources"), { recursive: true });
+  const windowsArchive = join(windowsApp, "resources", "app.asar");
+  const windowsExe = join(windowsApp, "Desktop.exe");
+  await copyFile(archive, windowsArchive);
+  const executableBytes = windowsExecutable(
+    sha256(asar.getRawHeader(archive).headerString),
+  );
+  await writeFile(windowsExe, executableBytes);
+  await writeFile(join(windowsApp, "native.dll"), "unmodified synthetic DLL");
+  const prepared = JSON.parse(
+    run([
+      "prepare-windows",
+      "--app",
+      windowsExe,
+      "--output",
+      join(temporary, "prepared Windows copy"),
+    ]),
+  );
+  assert.equal(prepared.status, "prepared");
+  assert.equal(prepared.embeddedAsarIntegrity, "enabled");
+  assert.equal(
+    JSON.parse(run(["check", "--asar", prepared.asar])).status,
+    "already-patched",
+  );
+  assert.equal(sha256(await readFile(windowsArchive)), original);
+  assert.deepEqual(await readFile(windowsExe), executableBytes);
+  assert.ok(
+    (await readFile(prepared.app)).includes(
+      Buffer.from(sha256(asar.getRawHeader(prepared.asar).headerString)),
+    ),
+  );
+  assert.equal(
+    await readFile(
+      join(temporary, "prepared Windows copy", "app", "native.dll"),
+      "utf8",
+    ),
+    "unmodified synthetic DLL",
+  );
   assert.equal(JSON.parse(run(["patch", "--asar", archive])).status, "patched");
   assert.equal(
     JSON.parse(run(["check", "--asar", archive])).status,
@@ -203,7 +250,7 @@ try {
   );
   assert.deepEqual(JSON.parse(await readFile(nativePath, "utf8")), native);
   console.log(
-    `PASS ${target}: bundled Node, empty PATH, paths with spaces, exit status, catalog, ASAR check/patch/idempotence and independent ASAR reader`,
+    `PASS ${target}: bundled Node, empty PATH, paths with spaces, exit status, catalog, Windows copy preparation/integrity, ASAR check/patch/idempotence and independent ASAR reader`,
   );
 } finally {
   await rm(temporary, { recursive: true, force: true });

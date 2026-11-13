@@ -210,6 +210,53 @@ JavaScript and dependencies, and needs an existing Node.js 22+ installation:
 run `node dist/cli.js --help` after extraction. GitHub's automatic `Source code`
 archives contain source and require building.
 
+### Windows: Microsoft Store / MSIX installations
+
+`prepare-windows` is available in **0.6.2 and later**. Download the matching
+Windows package above; older packages do not contain this command. From a source
+build, replace `.\codex-desktop-providers.cmd` below with `node .\dist\cli.js`.
+
+Use `prepare-windows` for an application installed under `WindowsApps`. It reads
+the installed application and creates a complete patched copy in a new writable
+directory. Direct `patch` inside WindowsApps is unsupported, including from an
+elevated shell. `check` is read-only: `status: ready` means the archive's patch
+points match, not that its directory is writable or the application will launch.
+
+From PowerShell in the extracted patch-tool directory, locate the installed EXE
+and choose a **new** output directory. For the installation in the reported issue:
+
+```powershell
+$app = 'C:\Program Files\WindowsApps\OpenAI.Codex_26.1106.6628.0_x64__2p2nqsd0c76g0\app\Codex.exe'
+$destination = Join-Path $env:LOCALAPPDATA 'CodexProviders\26.1106.6628.0-patched'
+.\codex-desktop-providers.cmd prepare-windows --app $app --output $destination
+```
+
+Replace the package path and EXE filename with those on your machine. The selected
+EXE must sit beside `resources\app.asar`. The destination must not already exist;
+the tool creates `$destination\app` with the EXE, DLLs, resources, and unpacked
+native modules. An incomplete copy is removed on failure. No extra Node install,
+ACL changes, package registration or credential migration is needed to prepare it.
+
+After success, fully quit the installed Desktop and start the exact `app` path
+printed in the JSON result. Store/Start-menu shortcuts still point to the original
+installation. For launch-time catalog generation, pass the returned EXE path to
+the existing `launch --app ...` command. Configure providers and models using the
+native configuration described above. For updates, prepare another new directory
+from a clean updated application; retain the original installation for rollback.
+
+Preparation checks Electron's embedded ASAR integrity and updates an existing
+EXE digest when validation is enabled, preserving the validation fuse. With
+validation disabled the EXE is copied byte-for-byte. Updating a signed EXE
+invalidates the **copy's** publisher signature; the result reports this, and an
+organization's signed-code policy may prevent it from running. Unsupported or
+ambiguous EXE layouts fail before a prepared app is published.
+
+This solves the protected-directory write failure. The copy is not an MSIX
+registration: features requiring package identity, graphical startup, native
+login and inference still need real Windows validation. `status: prepared` reports
+verified files, and `runtimeValidation: not-performed` explicitly records that the
+application was not started. See [Windows findings](docs/compatibility.md#windows-storemsix).
+
 ## Build and check
 
 Node.js 22 or newer is required. All dependencies are pinned in `package-lock.json`.
@@ -223,8 +270,10 @@ npm run format:check
 node dist/cli.js check --asar /path/to/app.asar
 ```
 
-The `check` command verifies compatibility and prints the planned manifest without
-writing anything. To apply to a **disposable copy** or a package build directory:
+The `check` command verifies archive structure and prints the planned manifest
+without writing anything. Its `target` field identifies standard WindowsApps
+paths; other targets report `permissions-not-checked`. It does not probe write
+access or certify graphical startup. To apply to a **disposable copy** or a package build directory:
 
 ```sh
 node dist/cli.js patch --asar /build/chatgpt/usr/lib/chatgpt/resources/app.asar

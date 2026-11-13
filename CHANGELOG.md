@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.2
+
+- Add `prepare-windows --app EXE --output NEW_DIRECTORY` to build a verified,
+  complete patched copy from a read-only Store/MSIX application directory.
+- Synchronize existing Windows executable ASAR integrity digests without
+  disabling integrity fuses; report invalidated signatures in modified copies.
+- Explain WindowsApps and archive write-permission failures, clarify the
+  read-only scope of `check`, and document Windows runtime-validation limits.
+
 ## 0.6.1
 
 - Add packages containing the official Node runtime for Linux, macOS, and Windows

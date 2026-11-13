@@ -91,6 +91,30 @@ written, flushed, and independently read back before an atomic rename. The sourc
 file's identity, size, and modification time must remain unchanged during writing.
 The installed desktop is never an implicit patch target.
 
+## Windows copy preparation
+
+`src/patch/prepare-windows.ts` handles `prepare-windows --app EXE --output DIR`.
+The selected EXE's directory supplies the entire application payload. A source
+inventory and structural patch/PE checks precede output creation. A newly created
+private output directory reserves ownership; an existing output is never reused.
+Copying preserves native files and internal links, remapping absolute internal
+links into the copy. Escaping links and credential files are rejected. Source
+identity/size/time inventories are compared around copying and patching to detect
+updates. Read-only source ASARs become writable only in the copy.
+
+The staged archive uses the same atomic writer and independent ASAR reader.
+`windows-executable.ts` bounds-checks PE section/resource offsets and locates the
+Electron V1 fuse wire plus `INTEGRITY/ELECTRONASAR` resource. It replaces only an
+existing fixed-size ASAR header digest, preserving fuses and all unrelated EXE
+bytes. A changed signed executable is explicitly reported as having invalidated
+its publisher signature. Both prepared artifacts are checked before renaming the
+private staging directory to `DIR/app`; exceptions remove the owned output.
+
+Preparation never starts an app or changes MSIX registration. Returned paths are
+explicit launch targets. No authentication, configuration or history migration
+is part of preparing a copy. `check` still reports archive compatibility only;
+its additive target information does not make a write probe.
+
 ## State
 
 Config discovery is cached for 30 seconds per client. Observed thread-provider

@@ -163,6 +163,41 @@ continues to flush its temporary file and rename in the same directory; POSIX
 also fsyncs the directory, while Windows skips that unsupported operation. Native
 tests include replacing an existing catalog and preserving it after a failure.
 
+## Windows protected-directory preparation (0.6.2, 2026-11-13)
+
+The reported Windows 11 failure used patch tool **0.6.1**, MSIX package
+**26.1106.6628.0** and archive app version **26.1106.51428**. The user reported
+successful read-only structural discovery and `EPERM` creating the sibling
+temporary directory, including from an elevated shell. No real Windows package
+or user data was accessed for local validation of this change.
+
+Added `prepare-windows` to create a complete application copy outside WindowsApps,
+patch the staged ASAR with the independent reader, and synchronize the EXE's
+existing digest only when its integrity fuse is enabled. Disabled validation
+leaves the EXE byte-for-byte unchanged. No fuse, native authentication logic,
+MSIX registration or thread data is changed.
+
+Local checks passed type checking, **68 synthetic tests**, build and formatting.
+Coverage includes PE32/PE32+ resources, active/inactive integrity, signed-image
+reporting, malformed/ambiguous metadata, read-only source files/directories,
+unpacked/native resource preservation, internal links, source/output separation,
+existing-output refusal, incomplete resources, credential-file refusal, failure
+cleanup, CLI exit statuses and paths with spaces. GNU `objdump` independently
+recognized the updated synthetic PE's `INTEGRITY/ELECTRONASAR` resource.
+
+`nix flake check` built the tool and ran the real **26.1103.32239 Linux** archive
+check/patch/recheck and method tests on a disposable archive. The compiled tool
+was also packaged with the pinned Linux x64 Node runtime and exercised through
+the standalone verification script with an empty PATH. That script now includes
+Windows-copy preparation, embedded digest synchronization and source preservation
+and is used by the existing six-target Release workflow.
+
+These results establish preparation and archive correctness. They do not establish
+Windows GUI startup, package-identity-dependent features, native login or inference
+for the reported app version. An updated signed EXE loses its valid publisher
+signature in the copy; organization policies may block that copy. No Windows
+runner or live Release was invoked during this local validation.
+
 ## Context-window probe (2026-11-08)
 
 An isolated probe used the backend bundled with Linux Desktop **26.1021.22027**

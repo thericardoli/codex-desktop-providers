@@ -4,6 +4,7 @@ import { createReadStream, createWriteStream, type Stats } from "node:fs";
 import { open, stat, mkdtemp, rename, rm } from "node:fs/promises";
 import { basename, dirname, join, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
+import { archiveWriteError, assertPatchTarget } from "./target.js";
 
 interface Entry {
   files?: Record<string, Entry>;
@@ -104,6 +105,7 @@ export async function rewriteArchive(
   archive: string,
   changes: ReadonlyMap<string, Buffer>,
 ): Promise<void> {
+  await assertPatchTarget(archive);
   const original = await stat(archive);
   const raw = getRawHeader(archive);
   const header = structuredClone(raw.header) as Entry;
@@ -121,7 +123,7 @@ export async function rewriteArchive(
   }
   const temporary = await mkdtemp(
     join(dirname(archive), ".desktop-providers-"),
-  );
+  ).catch((error: unknown) => archiveWriteError(error, archive));
   const output = join(temporary, basename(archive));
   try {
     await writeArchive(
@@ -148,6 +150,8 @@ export async function rewriteArchive(
     }
     await rename(output, archive);
     uncache(archive);
+  } catch (error) {
+    archiveWriteError(error, archive);
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
