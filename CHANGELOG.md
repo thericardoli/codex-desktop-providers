@@ -10,6 +10,8 @@
 - Exercise the extracted package on all six native CI runners with an empty PATH,
   including catalog generation and synthetic ASAR check/patch/idempotence.
 - Allow a manual build of the selected branch without publishing Release assets.
+- Convert ASAR paths for the host reader on Windows and retain file flushing and
+  atomic catalog replacement without an unsupported Windows directory fsync.
 
 ## 0.6.0
 

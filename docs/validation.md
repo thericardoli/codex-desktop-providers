@@ -156,6 +156,12 @@ package is provided.
 The first native preview exposed that Windows `Compress-Archive` rejects the
 generic tarball's 1970 timestamps. Windows staging now normalizes file/directory
 timestamps to 2000 before ZIP creation; runtime bytes and licenses stay unchanged.
+The next Windows preview reached execution and exposed the ASAR reader's use of
+host path separators. Canonical archive paths now convert at the reader boundary,
+including independent verification before atomic replacement. Catalog output
+continues to flush its temporary file and rename in the same directory; POSIX
+also fsyncs the directory, while Windows skips that unsupported operation. Native
+tests include replacing an existing catalog and preserving it after a failure.
 
 ## Context-window probe (2026-11-08)
 

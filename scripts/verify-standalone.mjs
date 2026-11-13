@@ -163,7 +163,7 @@ try {
       models: [{ slug: "external/model", display_name: "Synthetic external" }],
     }),
   );
-  run([
+  const catalogArgs = [
     "catalog",
     "--native-cache",
     nativePath,
@@ -171,10 +171,36 @@ try {
     externalPath,
     "--output",
     output,
-  ]);
+  ];
+  run(catalogArgs);
   const catalog = JSON.parse(await readFile(output, "utf8"));
   assert.deepEqual(catalog.models[0], native.models[0]);
   assert.equal(catalog.models[1].slug, "external/model");
+  await writeFile(
+    externalPath,
+    JSON.stringify({
+      template: "gpt-6-sol",
+      models: [
+        { slug: "external/model", display_name: "Updated synthetic external" },
+      ],
+    }),
+  );
+  run(catalogArgs);
+  assert.equal(
+    JSON.parse(await readFile(output, "utf8")).models[1].display_name,
+    "Updated synthetic external",
+  );
+  const validCatalog = await readFile(output);
+  await writeFile(
+    externalPath,
+    JSON.stringify({ template: "missing", models: [] }),
+  );
+  run(catalogArgs, false);
+  assert.deepEqual(
+    await readFile(output),
+    validCatalog,
+    "Failed catalog generation preserves the previous output",
+  );
   assert.deepEqual(JSON.parse(await readFile(nativePath, "utf8")), native);
   console.log(
     `PASS ${target}: bundled Node, empty PATH, paths with spaces, exit status, catalog, ASAR check/patch/idempotence and independent ASAR reader`,

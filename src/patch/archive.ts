@@ -2,7 +2,7 @@ import { getRawHeader, extractFile, uncache } from "@electron/asar";
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, type Stats } from "node:fs";
 import { open, stat, mkdtemp, rename, rm } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
 
 interface Entry {
@@ -53,7 +53,8 @@ function entryAt(root: Entry, path: string, create = false): Entry {
 }
 
 export function readText(archive: string, path: string): string {
-  return extractFile(archive, path).toString("utf8");
+  // Our ASAR paths use '/', while the independent reader splits on host separators.
+  return extractFile(archive, path.replaceAll("/", sep)).toString("utf8");
 }
 
 export function hasEntry(archive: string, path: string): boolean {
@@ -133,7 +134,7 @@ export async function rewriteArchive(
     );
     uncache(output);
     for (const [path, content] of changes) {
-      if (!extractFile(output, path).equals(content))
+      if (!extractFile(output, path.replaceAll("/", sep)).equals(content))
         throw new Error(`ASAR verification failed: ${path}`);
     }
     // Detect a replaced/truncated source while the patch was being prepared.

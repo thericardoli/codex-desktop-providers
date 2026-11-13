@@ -272,11 +272,15 @@ export async function prepareCatalog(
     await unchanged(native);
     await unchanged(external);
     await rename(temporary, output);
-    const directory = await open(dirname(output), "r");
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
+    // Node cannot fsync directory handles on Windows. The temporary file is
+    // flushed above and renamed within the same directory on every platform.
+    if (process.platform !== "win32") {
+      const directory = await open(dirname(output), "r");
+      try {
+        await directory.sync();
+      } finally {
+        await directory.close();
+      }
     }
   } finally {
     await file.close();
