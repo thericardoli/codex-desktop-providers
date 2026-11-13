@@ -2,14 +2,21 @@
 
 ## 0.6.0
 
-- Remove CI release publishing, portable bundle generation, and prebuilt Nix
-  installation; keep source checks and builds only.
+- Attach a compiled patch-tool archive with production dependencies and SHA-256
+  checksums whenever a GitHub Release is published, with manual upload retries.
+- Build Nix consumers from the source flake instead of prebuilt installers;
+  keep main/PR source checks separate from the Release workflow.
 - Attempt every Desktop version without version or asset-fingerprint allowlists.
 - Discover all five patch points across renderer assets, supporting renamed,
   nested, merged, and split modules with relative runtime imports.
 - Keep unique structural matches, atomic ASAR writes, idempotence, and installed
   patch integrity checks.
 - Decouple the CI Desktop fixture from the consumer's own Desktop version pin.
+- Generate native model catalogs from sparse external overrides, inheriting the
+  selected native template while preserving official model entries unchanged.
+- Regenerate the catalog before launching Desktop; reject legacy inline profile
+  model metadata and keep native profiles responsible for provider routing.
+- Support anonymous model filters nested inside newer Desktop effort selectors.
 
 ## 0.5.0
 
@@ -20,9 +27,6 @@
 - Expose one shared Desktop version/download/adapter manifest to the patch and
   Nix consumer; check package and patch version consistency in CI.
 - Validate the real upstream archive in a disposable Nix build before release.
-
-## Unreleased
-
 - Correct the GLM-5.3-Flash preset to low/high/max, retaining high as the configured
   default, and distinguish API acceptance from native model capability.
 

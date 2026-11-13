@@ -24,8 +24,32 @@
 
 `.github/workflows/ci.yml` runs on main pushes, pull requests, and manual dispatch.
 It uses SHA-pinned Actions, the checked-in nixpkgs lock, and read-only repository
-permissions. It runs `nix flake check` and builds the tool. There is no Release
-job, tag trigger, artifact upload, portable bundle, or prebuilt installer.
+permissions. It runs `nix flake check` and builds the tool.
+
+`.github/workflows/release.yml` runs when an existing GitHub Release is published,
+including pre-releases. It checks out the Release tag, repeats the source and
+upstream checks, builds with Nix, and packages only the compiled tool, production
+dependencies, examples, license, README, and source revision metadata. The tag
+must equal `v<package.json version>`; the compiled patch version must also match.
+`scripts/build-release.mjs` normalizes Nix Node shebangs, rejects remaining store
+references and escaping symlinks, and creates a deterministic versioned tarball
+and `SHA256SUMS`. No Desktop archive, credentials, or user configuration is copied.
+
+The workflow verifies the checksum and runs the extracted CLI before passing
+the package to a separate upload job. Only that job has `contents: write`; it
+attaches the tarball and checksums to the existing published Release. Manual
+dispatch accepts the same Release tag for retries. Re-running replaces assets
+with the same names. The workflow never creates a Release or publishes to npm.
+See GitHub's [Release event documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#release)
+for the `published` trigger and the CLI's
+[upload documentation](https://cli.github.com/manual/gh_release_upload) for retry
+behavior. Releases created by another workflow using
+[`GITHUB_TOKEN`](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow)
+do not trigger another workflow; publish through the UI/CLI with a user token or
+manually dispatch this workflow in that case.
+
+The portable package still needs Node.js 22 or newer. It does not bundle a Node
+runtime, provide a prebuilt Nix installer, or change the source-flake consumer.
 
 Keep `package.json`, `package-lock.json`, and `PATCH_VERSION` in
 `src/patch/constants.ts` consistent when updating the tool itself.

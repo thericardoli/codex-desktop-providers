@@ -12,7 +12,9 @@ This is an independent TypeScript patch project, not a model gateway.
 - Attempt every Desktop version without a version or asset-hash allowlist.
   Discover patch points structurally across renderer assets. Missing, ambiguous,
   or overlapping matches must fail before modifying the archive.
-- CI validates and builds source only; do not publish releases or prebuilt bundles.
+- Main/PR CI validates and builds source only. The separate Release workflow
+  attaches the compiled patch tool and checksums to an existing published Release;
+  never include the upstream Desktop application or user data.
 - Preserve unrelated ASAR payloads, native modules, links, executable bits, and
   unpacked metadata. Archive changes must be atomic and checked by an independent
   ASAR reader.

@@ -232,7 +232,18 @@ nix flake check
 ```
 
 CI checks and builds source on main pushes, pull requests, and manual dispatch.
-It does not publish GitHub Releases, portable bundles, or build artifacts.
+Publishing a GitHub Release (including a pre-release) also runs
+`.github/workflows/release.yml`, which checks and builds that tag, then attaches
+`codex-desktop-providers-<version>.tar.gz` and `SHA256SUMS` to the existing Release.
+Use a tag matching `v<package.json version>`. The workflow can also be dispatched
+manually with an existing published Release tag to retry an upload.
+
+The archive contains compiled JavaScript, production dependencies, examples, and
+source revision metadata. Extract it and run `node dist/cli.js --help` inside the
+extracted directory; Node.js 22 or newer is required, with no npm install or Nix
+needed. It contains only the patch tool; obtain Desktop separately. Nix consumers
+continue to build from the source flake.
+
 Standalone flake checks download the original Desktop pinned in
 `nix/upstream.json` and exercise the patch on a disposable archive. That pin is a
 test fixture only: it is not read by the patcher or exported as the consumer's

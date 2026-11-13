@@ -109,12 +109,31 @@ paths must leave the original archive unchanged.
 
 CI runs source checks and real-archive validation against `nix/upstream.json`,
 then builds the tool. The app archive remains in the disposable build directory.
-No releases or artifacts are uploaded. The local consumer builds the GitHub
+Main/PR CI does not upload releases or artifacts. The separate Release workflow
+now packages the compiled tool and production dependencies, checks the archive's
+SHA-256 checksum, and runs the extracted CLI before uploading Release assets.
+It does not distribute the upstream app. The local consumer builds the GitHub
 source flake; its Desktop version is pinned independently in its own derivation.
 
 The pipeline does not launch the graphical app or make authenticated model
 requests. Existing real-backend smoke evidence above remains separate from
 these structural and archive checks.
+
+## Release package validation (2026-11-13)
+
+The compiled **0.6.0** Nix output was packaged with its production dependencies
+on Linux x86_64. The tarball passed SHA-256 verification and the extracted CLI
+ran both through Node and directly through its portable shebang. The CLI's
+executable bit is restored during packaging. TypeScript and Prettier were absent
+from the archive; the package includes examples and source revision metadata.
+Repeated packaging with identical inputs produced identical archive bytes.
+A mismatched tag failed before creating an output directory.
+
+The workflow passed `actionlint`; type checking, all 55 unit tests, build, version
+consistency, formatting, and `nix flake check` also passed. The latter checked the
+real **26.1103.32239** Desktop fixture on a disposable archive. No installed app
+was modified. This local validation did not exercise GitHub event delivery or
+asset-upload permissions and did not create or change a live Release.
 
 ## Context-window probe (2026-11-08)
 

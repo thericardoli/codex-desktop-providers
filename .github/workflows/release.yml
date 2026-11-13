@@ -1,0 +1,78 @@
+name: Attach release package
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing published Release tag (v<package version>)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+      - uses: cachix/install-nix-action@3c6342b75005b9cc7c7d4069c3e9179247c89012 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Check source and upstream integration
+        run: nix flake check --print-build-logs
+      - name: Build tool
+        run: nix build --print-build-logs
+      - name: Create portable package
+        run: |
+          nix develop --command node scripts/build-release.mjs \
+            --package "$(readlink -f result)/lib/node_modules/codex-desktop-providers" \
+            --revision "$(git rev-parse HEAD)" \
+            --tag "$RELEASE_TAG"
+      - name: Verify extracted package
+        run: |
+          (cd release && sha256sum --check SHA256SUMS)
+          mkdir release-test
+          tar -xzf release/*.tar.gz -C release-test --strip-components=1
+          nix develop --command ./release-test/dist/cli.js --help
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-package
+          path: |
+            release/*.tar.gz
+            release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  upload:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-package
+          path: release
+      - name: Attach package to existing Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = false
+          gh release upload "$RELEASE_TAG" release/*.tar.gz release/SHA256SUMS --clobber
