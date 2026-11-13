@@ -135,6 +135,24 @@ real **26.1103.32239** Desktop fixture on a disposable archive. No installed app
 was modified. This local validation did not exercise GitHub event delivery or
 asset-upload permissions and did not create or change a live Release.
 
+## Standalone package validation (0.6.1, 2026-11-13)
+
+The Linux x64 platform archive was built with the official **Node 24.22.3**
+binary after verifying its pinned distribution hash. Its extracted launcher ran
+with an empty PATH from a directory containing spaces, without a separate Node,
+npm, compiler, or Nix command. The test verified runtime version/architecture,
+license and source metadata, CLI success/failure exit codes, synthetic native
+catalog preservation and external-model generation, read-only ASAR checking,
+patching, idempotence, and unrelated payload preservation through the independent
+`@electron/asar` reader. Local NixOS execution used its existing `nix-ld` setup.
+
+The same driver runs on native Linux, macOS, and Windows runners for both x64 and
+ARM64 before publication. Main source checks retain the 55 unit tests and real
+Desktop **26.1103.32239** validation on a disposable archive. These CLI and
+synthetic-archive tests do not exercise the graphical application or certify real
+macOS/Windows Desktop archives. Linux runtime packages target glibc; no musl
+package is provided.
+
 ## Context-window probe (2026-11-08)
 
 An isolated probe used the backend bundled with Linux Desktop **26.1021.22027**

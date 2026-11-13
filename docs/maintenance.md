@@ -35,11 +35,35 @@ must equal `v<package.json version>`; the compiled patch version must also match
 references and escaping symlinks, and creates a deterministic versioned tarball
 and `SHA256SUMS`. No Desktop archive, credentials, or user configuration is copied.
 
-The workflow verifies the checksum and runs the extracted CLI before passing
-the package to a separate upload job. Only that job has `contents: write`; it
-attaches the tarball and checksums to the existing published Release. Manual
-dispatch accepts the same Release tag for retries. Re-running replaces assets
-with the same names. The workflow never creates a Release or publishes to npm.
+The generic archive is then passed to six native runners: Linux, macOS, and
+Windows, each on x64 and ARM64. `scripts/build-standalone.mjs` verifies the generic
+archive and adds the matching official Node runtime and its license. Runtime
+versions and distribution hashes are pinned in `scripts/node-runtime.json`;
+verify updates against the version-specific official `SHASUMS256.txt`. The
+unmodified runtime preserves its upstream signature where present. Launchers use
+the bundled binary by path, with a `.cmd` entry point on Windows. These packages
+retain the real on-disk runtime modules needed for ASAR injection.
+
+`scripts/verify-standalone.mjs` extracts each final archive to a path containing
+spaces and launches it with an empty PATH. It checks the bundled runtime's
+version/architecture, CLI exit codes, catalog generation, and synthetic ASAR
+check/patch/idempotence, then reads the result through `@electron/asar` as an
+independent reader. Verification needs the build runner's Node 24 for the test
+driver and synthetic fixtures; users do not need a separately installed runtime.
+
+Only after the generic and all six native packages pass does the separate upload
+job run with `contents: write`. It merges and verifies checksums, then attaches
+all seven archives and `SHA256SUMS` to the existing published Release. Manual
+dispatch accepts the same Release tag for retries; `publish: false` retains only
+temporary workflow artifacts. Leaving `tag` empty tests the selected branch
+without publishing, useful before tagging a new version:
+
+```sh
+gh workflow run release.yml --ref main -F publish=false
+```
+
+Re-running publication replaces assets with the same names. The workflow never
+creates a Release or publishes to npm.
 See GitHub's [Release event documentation](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#release)
 for the `published` trigger and the CLI's
 [upload documentation](https://cli.github.com/manual/gh_release_upload) for retry
@@ -48,8 +72,12 @@ behavior. Releases created by another workflow using
 do not trigger another workflow; publish through the UI/CLI with a user token or
 manually dispatch this workflow in that case.
 
-The portable package still needs Node.js 22 or newer. It does not bundle a Node
-runtime, provide a prebuilt Nix installer, or change the source-flake consumer.
+The generic package still needs Node.js 22 or newer. Platform packages include
+Node 24 and need only the OS facilities required by that official binary. Linux
+targets glibc, with no musl package; NixOS users need `nix-ld` or the source flake.
+The source-flake consumer and its source builds remain unchanged. Native CLI
+smoke tests do not certify the graphical app or every Desktop archive on macOS
+and Windows; structural discovery continues to decide compatibility.
 
 Keep `package.json`, `package-lock.json`, and `PATCH_VERSION` in
 `src/patch/constants.ts` consistent when updating the tool itself.

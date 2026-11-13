@@ -163,6 +163,53 @@ reasoning efforts must be nonempty, unique, recognized by Codex, and include the
 declared default. For non-reasoning models declare `none` explicitly. Use the
 same upstream ID for the catalog `slug` and profile `model`.
 
+## Download a ready-to-run package
+
+Download a platform package and `SHA256SUMS` from
+[GitHub Releases](https://github.com/thericardoli/codex-desktop-providers/releases).
+Choose the operating system and architecture of the machine running the tool:
+
+| Operating system | x64 target    | ARM64 target    | Archive   |
+| ---------------- | ------------- | --------------- | --------- |
+| Linux            | `linux-x64`   | `linux-arm64`   | `.tar.gz` |
+| macOS            | `macos-x64`   | `macos-arm64`   | `.tar.gz` |
+| Windows          | `windows-x64` | `windows-arm64` | `.zip`    |
+
+The filename is `codex-desktop-providers-<version>-<target>` with the archive
+extension above. Extract it and run the included launcher from its directory:
+
+```sh
+# Linux and macOS
+./codex-desktop-providers --help
+./codex-desktop-providers check --asar /absolute/path/to/app.asar
+```
+
+```powershell
+# Windows PowerShell
+.\codex-desktop-providers.cmd --help
+.\codex-desktop-providers.cmd check --asar 'C:\absolute\path\to\app.asar'
+```
+
+These packages contain compiled JavaScript, all production dependencies, and an
+unmodified official **Node.js 24.22.3** runtime with its license. No Node install,
+npm install, local compilation, or Nix is required. Keep the extracted directory
+together; the launcher locates its own bundled runtime regardless of PATH or the
+current working directory. `release.json` records the source revision and the
+runtime's version, target, download URL, and verified SHA-256 hash.
+
+Linux packages target glibc systems (kernel 4.18+, glibc 2.28+); macOS requires
+13.5+ and Windows requires 10+. These follow the
+[official Node runtime requirements](https://github.com/nodejs/node/blob/v24.22.3/BUILDING.md#platform-list).
+Alpine/musl is not included. On NixOS, use the source flake below or an existing
+`nix-ld` setup capable of running the official Node binary. Native CI tests check
+all six packages with synthetic archives; real Desktop integration is currently
+validated on Linux. Obtain the Desktop application separately.
+
+The smaller `codex-desktop-providers-<version>.tar.gz` asset contains compiled
+JavaScript and dependencies, and needs an existing Node.js 22+ installation:
+run `node dist/cli.js --help` after extraction. GitHub's automatic `Source code`
+archives contain source and require building.
+
 ## Build and check
 
 Node.js 22 or newer is required. All dependencies are pinned in `package-lock.json`.
@@ -234,15 +281,13 @@ nix flake check
 CI checks and builds source on main pushes, pull requests, and manual dispatch.
 Publishing a GitHub Release (including a pre-release) also runs
 `.github/workflows/release.yml`, which checks and builds that tag, then attaches
-`codex-desktop-providers-<version>.tar.gz` and `SHA256SUMS` to the existing Release.
+the generic compiled archive, six packages with bundled runtimes, and a combined
+`SHA256SUMS` to the existing Release after all native package checks pass.
 Use a tag matching `v<package.json version>`. The workflow can also be dispatched
-manually with an existing published Release tag to retry an upload.
-
-The archive contains compiled JavaScript, production dependencies, examples, and
-source revision metadata. Extract it and run `node dist/cli.js --help` inside the
-extracted directory; Node.js 22 or newer is required, with no npm install or Nix
-needed. It contains only the patch tool; obtain Desktop separately. Nix consumers
-continue to build from the source flake.
+manually with an existing published Release tag to retry an upload. Leave the
+manual tag empty to test the selected branch without publishing. Package download
+and launcher instructions are above. Nix consumers continue to build from the
+source flake.
 
 Standalone flake checks download the original Desktop pinned in
 `nix/upstream.json` and exercise the patch on a disposable archive. That pin is a

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.1
+
+- Add packages containing the official Node runtime for Linux, macOS, and Windows
+  on x64 and ARM64. Extract and run the included launcher without installing Node,
+  npm dependencies, a compiler, or Nix.
+- Pin each Node archive's SHA-256 hash, retain its license, and record runtime
+  provenance alongside the compiled tool's source revision.
+- Exercise the extracted package on all six native CI runners with an empty PATH,
+  including catalog generation and synthetic ASAR check/patch/idempotence.
+- Allow a manual build of the selected branch without publishing Release assets.
+
 ## 0.6.0
 
 - Attach a compiled patch-tool archive with production dependencies and SHA-256
