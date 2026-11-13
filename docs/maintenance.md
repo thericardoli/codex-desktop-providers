@@ -43,6 +43,10 @@ verify updates against the version-specific official `SHASUMS256.txt`. The
 unmodified runtime preserves its upstream signature where present. Launchers use
 the bundled binary by path, with a `.cmd` entry point on Windows. These packages
 retain the real on-disk runtime modules needed for ASAR injection.
+The generic tarball uses 1970 timestamps for reproducibility. Windows ZIP staging
+normalizes timestamps to 2000 (inside ZIP's supported date range), without
+changing file contents or runtime signatures. PowerShell archive errors terminate
+the build rather than continuing with a missing or incomplete archive.
 
 `scripts/verify-standalone.mjs` extracts each final archive to a path containing
 spaces and launches it with an empty PATH. It checks the bundled runtime's

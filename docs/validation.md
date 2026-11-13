@@ -153,6 +153,10 @@ synthetic-archive tests do not exercise the graphical application or certify rea
 macOS/Windows Desktop archives. Linux runtime packages target glibc; no musl
 package is provided.
 
+The first native preview exposed that Windows `Compress-Archive` rejects the
+generic tarball's 1970 timestamps. Windows staging now normalizes file/directory
+timestamps to 2000 before ZIP creation; runtime bytes and licenses stay unchanged.
+
 ## Context-window probe (2026-11-08)
 
 An isolated probe used the backend bundled with Linux Desktop **26.1021.22027**

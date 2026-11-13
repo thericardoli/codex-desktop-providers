@@ -8,7 +8,9 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   rm,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -70,6 +72,19 @@ const temporary = await mkdtemp(join(tmpdir(), "providers-standalone-"));
 const name = `${pkg.name}-${pkg.version}-${target}`;
 const root = join(temporary, name);
 const output = resolve(values.output);
+
+async function normalizeZipTimes(directory) {
+  // ZIP cannot represent the generic tarball's reproducible 1970 timestamps.
+  // 2000 is safe even when converted to a different local time zone.
+  const timestamp = new Date("2000-01-01T00:00:00Z");
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) await normalizeZipTimes(path);
+    else await utimes(path, timestamp, timestamp);
+  }
+  await utimes(directory, timestamp, timestamp);
+}
+
 try {
   await mkdir(root);
   // npm's Unix-only .bin links are unnecessary: the launcher uses the CLI directly.
@@ -153,13 +168,14 @@ try {
   const filename = `${name}.${windows ? "zip" : "tar.gz"}`;
   const archive = join(output, filename);
   if (windows) {
+    await normalizeZipTimes(root);
     execFileSync(
       "powershell.exe",
       [
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        "Compress-Archive -LiteralPath $env:STANDALONE_ROOT -DestinationPath $env:STANDALONE_ARCHIVE -CompressionLevel Optimal -Force",
+        "$ErrorActionPreference = 'Stop'; Compress-Archive -LiteralPath $env:STANDALONE_ROOT -DestinationPath $env:STANDALONE_ARCHIVE -CompressionLevel Optimal -Force",
       ],
       {
         env: {
