@@ -11,6 +11,9 @@
    Keep one logical match per patch point even when it needs multiple source
    edits. Prefer boundary insertions for wrappers that contain other patch
    targets; overlapping source replacements must still fail before writing.
+   The logical request boundary includes the same client's optional extension
+   dispatcher. Test direct extension thread starts as well as `sendRequest` and
+   prewarming; a new transport path can bypass routing while all old tests pass.
 3. Run type checking, tests, formatting, and the package build. Apply the patch
    to a disposable archive and repeat `check` to verify integrity and idempotence.
 4. Test native and third-party models in separate chats, follow-up turns,

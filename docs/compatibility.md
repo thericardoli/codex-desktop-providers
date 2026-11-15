@@ -10,6 +10,13 @@ point must occur exactly once across the entire candidate set. The points may
 move between files, combine into one module, or split across modules. Injected
 runtime imports are relative to each discovered module's directory.
 
+The logical request point also covers `sendAppServerExtensionRequest` in the
+same native request-client class when present. All its direct three-argument
+`enqueueRequest` calls reuse the provider interceptor after native envelope
+merging. An exposed extension method with missing, ambiguous or unsupported
+dispatch structure fails planning. Older clients without the method retain the
+ordinary request boundary; no version number selects either layout.
+
 Both declared functions and function expressions are matched structurally. A
 bundler may inline the model visibility predicate inside the effort selector;
 the selector wrapper uses separate boundary insertions so both targets remain
@@ -94,16 +101,36 @@ claim about successful GUI startup or runtime use of any missing entry.
 
 ## Validated Desktop archives
 
-| Desktop version | Platform     | Evidence                                                                                                   |
-| --------------- | ------------ | ---------------------------------------------------------------------------------------------------------- |
-| 26.1007.71326   | Linux x86_64 | Actual structural patch and catalog-aware method tests                                                     |
-| 26.1021.22027   | Linux x86_64 | Actual structural patch/method tests; native catalog window, compaction and resume/fork smoke              |
-| 26.1103.32239   | Linux x86_64 | Actual archive patch, integrity/idempotence checks and method tests with nested anonymous picker functions |
+| Desktop version | Platform     | Evidence                                                                                                       |
+| --------------- | ------------ | -------------------------------------------------------------------------------------------------------------- |
+| 26.1007.71326   | Linux x86_64 | Actual structural patch and catalog-aware method tests                                                         |
+| 26.1021.22027   | Linux x86_64 | Actual structural patch/method tests; native catalog window, compaction and resume/fork smoke                  |
+| 26.1103.32239   | Linux x86_64 | Actual archive patch, integrity/idempotence checks and method tests with nested anonymous picker functions     |
+| 26.1111.21308   | Linux x86_64 | Actual archive patch/check and extension thread-start/first-turn method tests; isolated native Responses smoke |
 
 The 26.1103.32239 validation uses a disposable official archive and exercises
 native visibility/effort filtering, external model routing, prewarming and default
 selection without launching Electron or authenticating. Interactive inference,
 tool calls and restart/resume have not been revalidated for this version.
+
+On **26.1111.21308**, patch **0.6.3** could display registered external models
+while creating a new chat through an unpatched native extension dispatcher.
+The observed failed chat persisted `model_provider = openai` with the external
+model ID. Its first turn returned `model_not_found` and reported that the model
+was unsupported with a ChatGPT account. Desktop presents that error as
+"This model isn’t available". This is a missed routing boundary, not evidence
+that the external provider rejected a request.
+
+The **0.6.4** correction covers both the dedicated extension-start branch in
+26.1103.32239 and the generalized envelope dispatcher in 26.1111.21308. Rebuild
+from a clean upstream archive; an already patched 0.6.3 archive must not be reused.
+Previously created chats retain their original provider. Start a new chat after
+deploying the correction; no database/history migration is performed.
+
+Validation uses disposable official archives, the actual renderer method bodies
+with a synthetic transport, and an isolated native app-server with a localhost
+Responses fixture. It does not launch the modified Electron app or establish
+live-provider inference compatibility. The installed application is unchanged.
 
 `nix/upstream.json` pins the official download used by CI. It is an integration
 test fixture, not runtime compatibility data. Consumers independently select

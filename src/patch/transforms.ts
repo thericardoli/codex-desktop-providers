@@ -5,8 +5,10 @@ import {
   type FunctionDeclaration,
   type FunctionExpression,
   type Identifier,
+  type ClassBody,
+  type CallExpression,
 } from "acorn";
-import { full } from "acorn-walk";
+import { full, fullAncestor } from "acorn-walk";
 import MagicString from "magic-string";
 
 const BINDING = "__codexDesktopProviders";
@@ -44,6 +46,74 @@ function identifiers(params: readonly Node[]): string[] {
   });
 }
 
+/** Extension requests bypass sendRequest. Intercept after native envelope
+ * flattening so extension flags, validation, and scheduling stay native. Older
+ * clients without this method have only the ordinary request boundary. */
+function extensionEdits(source: string, parent: Node): SourceEdit[] {
+  if (parent.type !== "ClassBody")
+    throw new Error("Unexpected request dispatcher parent");
+  const methods = (parent as ClassBody).body.filter(
+    (member) =>
+      member.type !== "StaticBlock" &&
+      ((!member.computed &&
+        member.key.type === "Identifier" &&
+        member.key.name === "sendAppServerExtensionRequest") ||
+        (member.key.type === "Literal" &&
+          member.key.value === "sendAppServerExtensionRequest")),
+  );
+  if (!methods.length) return [];
+  if (methods.length !== 1)
+    throw new Error("Ambiguous extension request dispatcher");
+  const method = methods[0]!;
+  if (method.type !== "MethodDefinition")
+    throw new Error("Unexpected extension request dispatcher shape");
+  const body = method.value.body;
+  if (
+    !body ||
+    method.static ||
+    !source
+      .slice(body.start, body.end)
+      .includes("AppServerRequestClient is missing a message dispatcher")
+  )
+    throw new Error("Unexpected extension request dispatcher shape");
+  const edits: SourceEdit[] = [];
+  full(body, (node) => {
+    if (node.type !== "CallExpression") return;
+    const call = node as CallExpression;
+    const callee = call.callee;
+    if (
+      callee.type !== "MemberExpression" ||
+      callee.object.type !== "ThisExpression" ||
+      !(
+        (!callee.computed &&
+          callee.property.type === "Identifier" &&
+          callee.property.name === "enqueueRequest") ||
+        (callee.property.type === "Literal" &&
+          callee.property.value === "enqueueRequest")
+      )
+    )
+      return;
+    if (
+      call.arguments.length !== 3 ||
+      call.optional ||
+      callee.optional ||
+      call.arguments.some((arg) => arg.type === "SpreadElement")
+    )
+      throw new Error("Unexpected extension enqueueRequest arguments");
+    const args = call.arguments
+      .map((arg) => source.slice(arg.start, arg.end))
+      .join(",");
+    edits.push({
+      start: call.start,
+      end: call.end,
+      replacement: `${BINDING}.intercept(this,${args},(...args)=>this.enqueueRequest(...args))`,
+    });
+  });
+  if (!edits.length)
+    throw new Error("Missing extension enqueueRequest boundary");
+  return edits;
+}
+
 /** Avoid parsing unrelated vendor modules. These are code markers, not filenames. */
 export function isPatchCandidate(source: string): boolean {
   return (
@@ -63,7 +133,7 @@ export function isPatchCandidate(source: string): boolean {
 /** Locate all relevant edits in one module; uniqueness is checked across modules. */
 export function findPatchEdits(source: string): PatchEdit[] {
   const edits: PatchEdit[] = [];
-  full(ast(source), (node) => {
+  fullAncestor(ast(source), (node, _state, ancestors) => {
     if (node.type === "MethodDefinition") {
       const method = node as MethodDefinition;
       if (method.key.type !== "Identifier" || !method.value.body) return;
@@ -72,7 +142,11 @@ export function findPatchEdits(source: string): PatchEdit[] {
         method.value.body.start + 1,
         method.value.body.end - 1,
       );
-      const replace = (point: PatchPoint, replacement: string) =>
+      const replace = (
+        point: PatchPoint,
+        replacement: string,
+        extra: SourceEdit[] = [],
+      ) =>
         edits.push({
           point,
           edits: [
@@ -81,6 +155,7 @@ export function findPatchEdits(source: string): PatchEdit[] {
               end: method.value.body!.end - 1,
               replacement,
             },
+            ...extra,
           ],
         });
       if (
@@ -93,6 +168,7 @@ export function findPatchEdits(source: string): PatchEdit[] {
         replace(
           "request",
           `return ${BINDING}.intercept(this,${request},${params},${options},async(${request},${params},${options})=>{${body}});`,
+          extensionEdits(source, ancestors.at(-2)!),
         );
       }
       if (

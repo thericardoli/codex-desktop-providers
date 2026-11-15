@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.4
+
+- Route native extension thread-start requests through the existing provider
+  interceptor. New chats previously could bind an external model to OpenAI and
+  fail with `modelNotFound` on their first message.
+- Discover extension dispatches within the native request client structurally;
+  preserve native envelope merging, extension flags, validation and scheduling.
+- Exercise extension-created chats and their first turns in the real-archive
+  harness, alongside native model checks and cross-provider thread guards.
+
 ## 0.6.3
 
 - Prepare Windows copies with pre-existing absent or size-mismatched unpacked

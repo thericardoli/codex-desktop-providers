@@ -8,7 +8,13 @@ import { fileURLToPath } from "node:url";
 import { applyPatch, planPatch } from "../src/patch/patch.js";
 import { MANIFEST_PATH, RUNTIME_DIRECTORY } from "../src/patch/constants.js";
 import { readText, rewriteArchive, sha256 } from "../src/patch/archive.js";
-import { shared, picker, nestedPicker } from "./fixtures.js";
+import {
+  shared,
+  sharedWithExtension,
+  extensionMethod,
+  picker,
+  nestedPicker,
+} from "./fixtures.js";
 
 const runtime = fileURLToPath(new URL("../src/runtime", import.meta.url));
 const sharedPath = "webview/assets/renamed-client-abc123.js";
@@ -147,6 +153,24 @@ test("patch and verify an anonymous filter nested inside the effort selector", a
   );
 });
 
+test("include extension dispatch in the unique logical request patch point", async () => {
+  await fixture(
+    { [sharedPath]: sharedWithExtension, [pickerPath]: picker },
+    async (archive) => {
+      const plan = await planPatch(archive, runtime);
+      assert.match(
+        plan.changes.get(sharedPath)!.toString(),
+        /intercept\(this,method,\{ \.\.\.request, \.\.\.extensions \}/,
+      );
+      await applyPatch(archive, plan);
+      assert.equal(
+        (await planPatch(archive, runtime)).status,
+        "already-patched",
+      );
+    },
+  );
+});
+
 const nestedDefaults = shared
   .slice(0, shared.indexOf("export class Manager"))
   .replace(
@@ -161,6 +185,28 @@ for (const [name, files, error] of [
     /Overlapping upstream patch points/,
   ],
   ["missing patch points", { [sharedPath]: shared }, /visibility.*found 0/],
+  [
+    "missing extension dispatch boundary",
+    {
+      ...standard,
+      [sharedPath]: sharedWithExtension.replaceAll(
+        "this.enqueueRequest(method,",
+        "this.unknown(method,",
+      ),
+    },
+    /Missing extension enqueueRequest/,
+  ],
+  [
+    "ambiguous extension dispatchers",
+    {
+      ...standard,
+      [sharedPath]: sharedWithExtension.replace(
+        extensionMethod,
+        extensionMethod + extensionMethod,
+      ),
+    },
+    /Ambiguous extension request/,
+  ],
   [
     "ambiguous patch points across assets",
     { ...standard, "webview/assets/duplicate.js": shared },

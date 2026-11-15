@@ -57,7 +57,9 @@ selected `model_catalog_json` configuration, not an additive catalog mechanism.
 
 `src/patch/transforms.ts` locates five semantic boundaries with Acorn:
 
-- `AppServerRequestClient.sendRequest`
+- `AppServerRequestClient.sendRequest`, including direct `enqueueRequest` calls
+  in its sibling `sendAppServerExtensionRequest` method when present. Extension
+  interception happens after native envelope merging, before transport dispatch.
 - `AppServerRequestClient.prewarmThreadStart`
 - The conversation manager's `setDefaultModelConfig`
 - The model visibility predicate, identified by destructured property names

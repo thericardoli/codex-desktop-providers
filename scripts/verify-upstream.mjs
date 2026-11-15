@@ -18,6 +18,7 @@ const sources = Object.keys(manifest.inputs).map((path) =>
   extractFile(archive, path).toString(),
 );
 const methods = [];
+let extensionDispatchers = 0;
 for (const shared of sources)
   full(
     parse(shared, { ecmaVersion: "latest", sourceType: "module" }),
@@ -25,15 +26,27 @@ for (const shared of sources)
       if (node.type !== "MethodDefinition") return;
       const source = shared.slice(node.start, node.end);
       if (
-        source.includes("__codexDesktopProviders.") &&
-        ["sendRequest", "prewarmThreadStart", "setDefaultModelConfig"].includes(
-          node.key.name,
+        node.key.name === "sendAppServerExtensionRequest" &&
+        source.includes(
+          "AppServerRequestClient is missing a message dispatcher",
         )
+      )
+        extensionDispatchers++;
+      if (
+        source.includes("__codexDesktopProviders.") &&
+        [
+          "sendRequest",
+          "sendAppServerExtensionRequest",
+          "prewarmThreadStart",
+          "setDefaultModelConfig",
+        ].includes(node.key.name)
       )
         methods.push(source);
     },
   );
-assert.equal(methods.length, 3);
+assert.ok(extensionDispatchers <= 1);
+const hasExtension = extensionDispatchers === 1;
+assert.equal(methods.length, hasExtension ? 4 : 3);
 // Locate the prewarm source-label helper structurally; minified names change.
 // The explicit trace passed below avoids initializing Electron telemetry.
 const traceSources = new Set();
@@ -118,6 +131,43 @@ assert.deepEqual(
 );
 await client.sendRequest("thread/start", { model }, {});
 assert.equal(calls.at(-1).params.modelProvider, "openrouter");
+if (hasExtension) {
+  for (const enrolled of [false, true]) {
+    const options = { priority: "critical" };
+    const started = await client.sendAppServerExtensionRequest(
+      "thread/start",
+      { request: { model }, daybreakProgramPropagationEnrolled: enrolled },
+      options,
+    );
+    assert.equal(started.thread.modelProvider, "openrouter");
+    assert.equal(calls.at(-1).params.modelProvider, "openrouter");
+    assert.equal(
+      calls.at(-1).params.daybreakProgramPropagationEnrolled,
+      enrolled,
+    );
+    assert.equal(calls.at(-1).options, options);
+    const reads = calls.filter((call) => call.method === "thread/read").length;
+    await client.sendRequest(
+      "turn/start",
+      { threadId: started.thread.id, model },
+      {},
+    );
+    assert.equal(calls.at(-1).method, "turn/start");
+    assert.equal(
+      calls.filter((call) => call.method === "thread/read").length,
+      reads,
+      "Extension start responses must establish the observed provider",
+    );
+    await assert.rejects(
+      client.sendRequest(
+        "turn/start",
+        { threadId: started.thread.id, model: "gpt" },
+        {},
+      ),
+      /Start a new chat/,
+    );
+  }
+}
 await client.prewarmThreadStart({ model }, { trace: {} });
 assert.equal(calls.at(-1).params.modelProvider, "openrouter");
 client.defaultTurnConfig = {
@@ -265,5 +315,5 @@ assert.deepEqual(
   ["low", "high", "max"],
 );
 console.log(
-  `PASS ${version}: actual model filter, native entitlement filtering, model listing, direct routing, prewarm and default selection`,
+  `PASS ${version}: actual model filter, native entitlement filtering, model listing, direct routing${hasExtension ? ", extension thread starts/first turns" : ""}, prewarm and default selection`,
 );

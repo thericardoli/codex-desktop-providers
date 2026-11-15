@@ -25,6 +25,52 @@ inference IDs. The native-backend smoke uses a real `model_name` TOML field,
 confirms native normalization drops it, and verifies the patched model list
 recovers its label while the upstream still receives the unchanged model ID.
 
+## Extension thread-start routing (0.6.4, 2026-11-15)
+
+Read-only investigation on Desktop **26.1111.21308** / bundled
+`codex-cli 0.169.0-alpha.11.1` found a failed newly created external-model chat
+persisted under the OpenAI provider. Its first-turn error was `model_not_found`,
+stating that the external model was unsupported with a ChatGPT account. No
+credential file or credential helper was accessed.
+
+The actual renderer uses `sendAppServerExtensionRequest` when thread creation
+includes the Daybreak propagation enrollment flag, including an explicit false.
+That method flattens the request envelope and calls `enqueueRequest` directly.
+The previous patch covered `sendRequest` and prewarming, so this path bypassed
+both provider injection and response observation. The previous archive harness
+also tested only those ordinary paths.
+
+The request patch now discovers the sibling extension dispatcher structurally
+and wraps its transport calls with the existing runtime interceptor. Native
+envelope merging, admission checks, extension flags, options and scheduling stay
+in the original method. A present method with missing or unsupported dispatches,
+or duplicate methods, fails before writing. Clients without the method require
+no extension patch. The runtime routing/authentication implementation is unchanged.
+
+Synthetic regressions cover external extension creation followed by the first
+turn, provider observation, outer-envelope provider conflicts, existing-thread
+guards, official requests, remote hosts, native admission errors and preservation
+of the source archive on invalid layouts. The archive harness now requires an
+exposed extension dispatcher to be patched and exercises false/true enrollment
+flags and first turns. It detects the missing boundary in the installed 0.6.3
+archive without modifying it.
+
+Disposable clean official **26.1103.32239** and **26.1111.21308** archives are
+checked, patched and checked again with the independent ASAR reader. Their actual
+patched method tests cover the dedicated and generalized extension layouts.
+The existing isolated native-backend Responses test also passes with the newer
+bundled backend, covering routing, reasoning, context, compaction and resume/fork.
+These tests use synthetic configuration and localhost inference only. Interactive
+Electron operation and live external-provider requests remain unverified.
+
+Type checking, **81 synthetic tests**, build, formatting, version consistency and
+`nix flake check` pass locally, including Nix's disposable 26.1103.32239 archive
+check and actual method harness.
+
+The patch version is bumped so an older patched archive is rejected rather than
+reported as already corrected. Upgrade from a clean upstream copy and create a
+new chat; existing provider bindings and history remain unchanged.
+
 ## Actual application assets
 
 Work with a disposable archive, retaining the original application untouched:
