@@ -24,6 +24,26 @@ export const sharedWithExtension = shared.replace(
   `  ${extensionMethod}\n  async prewarmThreadStart`,
 );
 
+export const hosted = `class HostedClient {
+  async sendRequest(method, params, options) { return this.send(this.createRequest(method, params, options?.trace), options, false, method === "thread/start"); }
+  async sendAppServerExtensionRequest(...[method, envelope, options]) {
+    if (method !== "turn/addUserMessage") {
+      const { request, ...extensions } = envelope;
+      return this.sendRequest(method, { ...request, ...extensions }, options);
+    }
+    return this.send(this.createExtensionRequest(method, envelope, options?.trace), options, false, true);
+  }
+  async prewarmThreadStart(params, options) { return this.send(this.createRequest("thread/start", params, options?.trace), options, true, true); }
+  createRequest(method, params) { return {method, params}; }
+  createExtensionRequest(method, params) { return {method, params}; }
+  sendToConnection() {}
+}
+class HostedManager {
+  setDefaultModelConfig(model, effort, profile) { return this.defaultTurnConfig.writeModel(model, effort, profile); }
+}
+module.exports = { HostedClient, HostedManager };
+`;
+
 export const picker = `export function visible({ model: selected, availableModels, useHiddenModels, hasConfiguredModelCatalog, apiKeyDaybreakSupported }) {
   let programs = selected.availableAccessPrograms?.cyber;
   return (hasConfiguredModelCatalog || availableModels.has(selected.model)) && !selected.hidden && !programs;

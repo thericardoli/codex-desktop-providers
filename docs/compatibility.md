@@ -17,6 +17,13 @@ merging. An exposed extension method with missing, ambiguous or unsupported
 dispatch structure fails planning. Older clients without the method retain the
 ordinary request boundary; no version number selects either layout.
 
+Hosted chat management is a separate execution path. The patch also discovers
+request, prewarm and default-model boundaries in main-process application
+JavaScript, without naming a particular chunk or bundler directory. If this
+group is exposed, all three points must occur exactly once. CommonJS hosts
+load the shared ES-module runtime using dynamic imports and explicit package
+metadata. Clients without hosted management need only the renderer group.
+
 Both declared functions and function expressions are matched structurally. A
 bundler may inline the model visibility predicate inside the effort selector;
 the selector wrapper uses separate boundary insertions so both targets remain
@@ -126,6 +133,20 @@ The **0.6.4** correction covers both the dedicated extension-start branch in
 from a clean upstream archive; an already patched 0.6.3 archive must not be reused.
 Previously created chats retain their original provider. Start a new chat after
 deploying the correction; no database/history migration is performed.
+
+**0.6.4 remains insufficient when Desktop uses hosted chat management.** A
+follow-up on the same 26.1111.21308 archive confirmed the running app had 0.6.4,
+yet new external chats still persisted under OpenAI and selection rewrote the
+global model. The main-process manager/request client was outside the old
+renderer-only discovery scope. **0.6.5** covers this independent path and checks
+the actual hosted method bodies, not just the renderer copy. Global defaults
+must be restored to an official model after an affected launch; existing failed
+chats remain bound to their original provider.
+
+After switching to the local **0.6.5** build on **26.1111.21308**, the user
+confirmed on **2026-11-15** that the reported issue was fully resolved. This is
+user-reported interactive evidence for the fix, alongside the isolated automated
+hosted-method and backend checks.
 
 Validation uses disposable official archives, the actual renderer method bodies
 with a synthetic transport, and an isolated native app-server with a localhost

@@ -14,6 +14,9 @@
    The logical request boundary includes the same client's optional extension
    dispatcher. Test direct extension thread starts as well as `sendRequest` and
    prewarming; a new transport path can bypass routing while all old tests pass.
+   Inspect hosted main-process management too: exposed hosted request, prewarm
+   and default-writer boundaries must all be patched. Exercise the hosted
+   methods with the real isolated backend using `verify-app-server.mjs --asar`.
 3. Run type checking, tests, formatting, and the package build. Apply the patch
    to a disposable archive and repeat `check` to verify integrity and idempotence.
 4. Test native and third-party models in separate chats, follow-up turns,

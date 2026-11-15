@@ -2,7 +2,7 @@
 
 The CLI is Node.js/TypeScript. Its build-time check/patch commands modify disposable
 archives; host-side catalog/launch commands prepare metadata before application
-startup. The injected renderer modules are plain ES modules with no Node.js
+startup. The injected shared modules are plain ES modules with no Node.js
 imports or HTTP client. The host-only `src/runtime/catalog.ts` module is not
 injected into ASAR. There is no daemon or inference proxy.
 
@@ -73,7 +73,17 @@ MagicString wraps the existing function bodies; scheduling, errors, and tracing
 remain in the original implementation. Imports reference our own isolated ES
 module directory, avoiding modifications to hashed upstream import graphs.
 
-`src/patch/discovery.ts` enumerates packed renderer JavaScript under `webview/`.
+`src/patch/host-transforms.ts` also locates hosted `sendRequest`,
+`prewarmThreadStart` and `setDefaultModelConfig` boundaries in application
+JavaScript outside `webview/` and `node_modules/`. If any hosted boundary is
+exposed, all three must be present and unique. Hosted extension starts must
+delegate to the wrapped sender; unknown direct request paths fail planning.
+CommonJS host chunks use a lazy dynamic import of the same runtime directory,
+whose injected `package.json` declares ES modules. No native transport, account
+authentication or credential access is reimplemented. Model decoration is
+idempotent when both host and renderer intercept a response.
+
+`src/patch/discovery.ts` enumerates packed renderer and application JavaScript.
 It uses code markers to skip unrelated assets and collects structural edits from
 all candidate modules. Every patch point must be unique globally. There are no
 version adapters or source fingerprint allowlists. Modules may be renamed,

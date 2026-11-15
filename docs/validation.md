@@ -71,6 +71,44 @@ The patch version is bumped so an older patched archive is rejected rather than
 reported as already corrected. Upgrade from a clean upstream copy and create a
 new chat; existing provider bindings and history remain unchanged.
 
+## Hosted chat management (0.6.5, 2026-11-15)
+
+A follow-up confirmed Desktop **26.1111.21308** was running with patch **0.6.4**.
+New external-model chats still persisted under OpenAI and the global model was
+rewritten to the selected external ID. The archive contains a main-process
+hosted manager and request client in addition to the renderer implementations.
+The previous discovery scope did not patch them, and the previous harness
+exercised only the renderer copies. Correcting a launcher/default setting alone
+does not cover this missing execution path.
+
+The patch now requires unique hosted request, prewarm and default-writer points
+when that family is exposed. CommonJS loads the existing runtime through lazy
+dynamic imports; a runtime-directory `package.json` marks the modules as ESM.
+Duplicate decoration through host and renderer is prevented. Synthetic tests
+exercise actual CommonJS loading, external selection without global writes,
+extension starts, provider observation, first turns, prewarming, remote exclusion
+and incomplete/ambiguous hosted discovery, including renamed host directories.
+
+The real-archive harness now also scans exposed hosted classes independently of
+the patch manifest, so it detects the omission in 0.6.4. Actual patched hosted
+methods pass against disposable **26.1103.32239** and **26.1111.21308** archives.
+`verify-app-server.mjs --asar PATCHED_ARCHIVE --codex BUNDLED_CODEX` uses the
+actual hosted method bodies for external selection and extension thread creation
+before the real isolated native backend completes localhost Responses turns,
+reasoning, context, compaction and resume/fork checks. No account credentials or
+external credential helpers are used.
+
+A separate Electron **44.10.2** Node-mode probe imported the shared runtime
+directly from the patched ASAR, verifying Node/Electron ESM resolution beyond
+ordinary-filesystem CommonJS tests. The Desktop executable's disabled RunAsNode
+fuse was left unchanged. Local source checks cover **88 synthetic tests**, type
+checking, build, formatting, version consistency and Nix checks.
+
+The user subsequently confirmed on **2026-11-15** that the reported issue was
+fully resolved in the local **0.6.5** build of Desktop **26.1111.21308**. This is
+user-reported interactive confirmation for that issue; the automated inference
+checks above still use an isolated localhost provider.
+
 ## Actual application assets
 
 Work with a disposable archive, retaining the original application untouched:

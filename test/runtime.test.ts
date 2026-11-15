@@ -65,6 +65,18 @@ function profileConfig(profile: JsonObject): JsonObject {
 }
 const route = () => ({ model: MODEL, model_provider: "openrouter" });
 
+test("model decoration remains idempotent across host and renderer interception", () => {
+  const models = readProfiles(config(), [customModel()]);
+  const original = { data: [nativeModel(), customModel()], nextCursor: null };
+  const once = decorateModels(original, models);
+  const twice = decorateModels(once, models);
+  assert.deepEqual(twice, once);
+  assert.equal(
+    (twice.data as JsonObject[])[1]!.displayName,
+    "GLM 5.3 Flash (OpenRouter)",
+  );
+});
+
 function fixture(
   options: {
     hostId?: string;

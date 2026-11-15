@@ -27,6 +27,7 @@ runCommand "codex-desktop-providers-upstream-${desktop.version}"
 
     mkdir scripts
     cp ${../scripts/verify-upstream.mjs} scripts/verify-upstream.mjs
+    cp ${../scripts/host-fixture.mjs} scripts/host-fixture.mjs
     cp -R ${package}/lib/node_modules/codex-desktop-providers/{dist,node_modules} .
     node scripts/verify-upstream.mjs --asar "$archive"
     mkdir "$out"

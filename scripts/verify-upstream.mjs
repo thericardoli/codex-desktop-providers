@@ -7,6 +7,7 @@ import { parse } from "acorn";
 import { full } from "acorn-walk";
 import { MANIFEST_PATH } from "../dist/patch/constants.js";
 import * as runtime from "../dist/runtime/index.js";
+import { hostFixture } from "./host-fixture.mjs";
 
 const { values } = parseArgs({ options: { asar: { type: "string" } } });
 if (!values.asar)
@@ -14,9 +15,9 @@ if (!values.asar)
 const archive = values.asar;
 const version = JSON.parse(extractFile(archive, "package.json")).version;
 const manifest = JSON.parse(extractFile(archive, MANIFEST_PATH));
-const sources = Object.keys(manifest.inputs).map((path) =>
-  extractFile(archive, path).toString(),
-);
+const sources = Object.keys(manifest.inputs)
+  .filter((path) => path.startsWith("webview/"))
+  .map((path) => extractFile(archive, path).toString());
 const methods = [];
 let extensionDispatchers = 0;
 for (const shared of sources)
@@ -317,3 +318,43 @@ assert.deepEqual(
 console.log(
   `PASS ${version}: actual model filter, native entitlement filtering, model listing, direct routing${hasExtension ? ", extension thread starts/first turns" : ""}, prewarm and default selection`,
 );
+
+const hostedCalls = [];
+const hosted = hostFixture(archive, async (method, params, options, flags) => {
+  hostedCalls.push({ method, params, options, flags });
+  if (method === "config/read") return client.sendConfigReadRequest();
+  return client.enqueueRequest(method, params, options);
+});
+if (hosted) {
+  const listed = await hosted.sendRequest("model/list", {});
+  assert.equal(listed.data[1].codexDesktopProvider, "openrouter");
+  assert.deepEqual(await hosted.setDefaultModelConfig(model, "low", null), {
+    status: "okOverridden",
+  });
+  const started = await hosted.sendAppServerExtensionRequest(
+    "thread/start",
+    { request: { model }, daybreakProgramPropagationEnrolled: false },
+    {},
+  );
+  assert.equal(started.thread.modelProvider, "openrouter");
+  assert.equal(hostedCalls.at(-1).params.config.model_reasoning_effort, "low");
+  await hosted.sendRequest(
+    "turn/start",
+    { threadId: started.thread.id, model },
+    {},
+  );
+  await assert.rejects(
+    hosted.sendRequest(
+      "turn/start",
+      { threadId: started.thread.id, model: "gpt" },
+      {},
+    ),
+    /Start a new chat/,
+  );
+  await hosted.prewarmThreadStart({ model }, {});
+  assert.equal(hostedCalls.at(-1).params.modelProvider, "openrouter");
+  assert.equal(hostedCalls.at(-1).flags.prewarm, true);
+  console.log(
+    `PASS ${version}: actual hosted request client, extension starts, first turns, prewarm and global-default protection`,
+  );
+}

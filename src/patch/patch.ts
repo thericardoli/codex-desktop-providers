@@ -7,8 +7,8 @@ import {
   RUNTIME_ASSETS,
 } from "./constants.js";
 import { hasEntry, readText, rewriteArchive, sha256 } from "./archive.js";
-import { discoverChanges, isRendererAsset } from "./discovery.js";
-import { PATCH_POINTS } from "./transforms.js";
+import { discoverChanges, isPatchAsset } from "./discovery.js";
+import { PATCH_POINTS, HOST_PATCH_POINTS } from "./transforms.js";
 
 interface Manifest {
   schemaVersion: 2;
@@ -52,8 +52,8 @@ function verifyManifest(
   const expectedPaths = [...sourcePaths, ...runtimeAssets.keys()].sort();
   if (
     !sourcePaths.length ||
-    sourcePaths.length > PATCH_POINTS.length ||
-    !sourcePaths.every(isRendererAsset) ||
+    sourcePaths.length > PATCH_POINTS.length + HOST_PATCH_POINTS.length ||
+    !sourcePaths.every(isPatchAsset) ||
     Object.keys(manifest.outputs).sort().join("\n") !==
       expectedPaths.join("\n") ||
     [...runtimeAssets].some(
@@ -80,6 +80,11 @@ export async function planPatch(
       `${RUNTIME_DIRECTORY}/${name}`,
       await readFile(join(runtimeDirectory, name)),
     );
+  // Node's CommonJS host dynamically imports the same browser-safe ES modules.
+  runtimeAssets.set(
+    `${RUNTIME_DIRECTORY}/package.json`,
+    Buffer.from('{"type":"module"}\n'),
+  );
   if (hasEntry(archive, MANIFEST_PATH)) {
     const manifest = verifyManifest(
       JSON.parse(readText(archive, MANIFEST_PATH)),

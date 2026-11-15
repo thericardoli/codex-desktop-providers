@@ -14,12 +14,14 @@ import {
   extensionMethod,
   picker,
   nestedPicker,
+  hosted,
 } from "./fixtures.js";
 
 const runtime = fileURLToPath(new URL("../src/runtime", import.meta.url));
 const sharedPath = "webview/assets/renamed-client-abc123.js";
 const pickerPath = "webview/assets/nested/menu-new.mjs";
 const standard = { [sharedPath]: shared, [pickerPath]: picker };
+const hostPath = ".vite/build/renamed-host-abc.cjs";
 
 async function fixture(
   files: Record<string, string>,
@@ -80,6 +82,23 @@ for (const version of ["99.123.456-future", "0.0.1-old", undefined]) {
     );
   });
 }
+
+test("discover optional hosted manager and request boundaries across main-process assets", async () => {
+  await fixture({ ...standard, [hostPath]: hosted }, async (archive) => {
+    const plan = await planPatch(archive, runtime);
+    assert.ok(plan.changes.has(hostPath));
+    assert.match(
+      plan.changes.get(hostPath)!.toString(),
+      /const __codexDesktopProviders=\(\)=>import\("\.\.\/\.\.\/webview\/assets\/codex-desktop-providers\/index.js"\)/,
+    );
+    assert.equal(
+      plan.changes.get(`${RUNTIME_DIRECTORY}/package.json`)!.toString(),
+      '{"type":"module"}\n',
+    );
+    await applyPatch(archive, plan);
+    assert.equal((await planPatch(archive, runtime)).status, "already-patched");
+  });
+});
 
 test("accept changed source hashes and both roles combined in one differently named asset", async () => {
   await fixture(
@@ -178,6 +197,16 @@ const nestedDefaults = shared
     "class Nested { setDefaultModelConfig(model, effort) { return this.defaultTurnConfig.writeModel(model, effort); } } return this.enqueueRequest(method, params, options);",
   );
 
+test("discover hosted boundaries outside a particular bundler directory", async () => {
+  await fixture(
+    { ...standard, "host/nested/runtime.cjs": hosted },
+    async (archive) => {
+      const plan = await planPatch(archive, runtime);
+      assert.ok(plan.changes.has("host/nested/runtime.cjs"));
+    },
+  );
+});
+
 for (const [name, files, error] of [
   [
     "overlapping patch points",
@@ -185,6 +214,19 @@ for (const [name, files, error] of [
     /Overlapping upstream patch points/,
   ],
   ["missing patch points", { [sharedPath]: shared }, /visibility.*found 0/],
+  [
+    "missing host request point",
+    {
+      ...standard,
+      [hostPath]: hosted.slice(hosted.indexOf("class HostedManager")),
+    },
+    /host-request.*found 0/,
+  ],
+  [
+    "ambiguous host request points",
+    { ...standard, [hostPath]: hosted, ".vite/build/another.cjs": hosted },
+    /host-request.*found 2/,
+  ],
   [
     "missing extension dispatch boundary",
     {

@@ -11,8 +11,11 @@ import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 import { intercept, writeDefault } from "../dist/runtime/index.js";
 import { prepareCatalog } from "../dist/runtime/catalog.js";
+import { hostFixture } from "./host-fixture.mjs";
 
-const { values } = parseArgs({ options: { codex: { type: "string" } } });
+const { values } = parseArgs({
+  options: { codex: { type: "string" }, asar: { type: "string" } },
+});
 if (!values.codex) throw new Error("Expected --codex /path/to/native/codex");
 const model = "z-ai/glm-5.3-flash";
 const temporary = await mkdtemp(
@@ -201,7 +204,7 @@ const raw = (method, params) =>
     pending.set(id, { resolve, reject });
     child.stdin.write(JSON.stringify({ id, method, params }) + "\n");
   });
-const client = {
+const client = (values.asar ? hostFixture(values.asar, raw) : null) ?? {
   hostId: "local",
   sendRequest: (method, params, options) =>
     intercept(client, method, params, options, raw),
@@ -228,14 +231,23 @@ try {
   const named = catalog.data.find((entry) => entry.model === model);
   assert.equal(named?.displayName, "GLM 5.3 Flash (Local smoke upstream)");
   assert.equal(named?.id, model);
-  await writeDefault(client, model, "low", async () => {
+  const forbidDefault = async () => {
     throw Error("Global model default must not be written");
-  });
-  const started = await client.sendRequest("thread/start", {
+  };
+  if (client.setDefaultModelConfig)
+    await client.setDefaultModelConfig(model, "low", null);
+  else await writeDefault(client, model, "low", forbidDefault);
+  const startParams = {
     model,
     cwd: temporary,
     ephemeral: false,
-  });
+  };
+  const started = client.sendAppServerExtensionRequest
+    ? await client.sendAppServerExtensionRequest("thread/start", {
+        request: startParams,
+        daybreakProgramPropagationEnrolled: false,
+      })
+    : await client.sendRequest("thread/start", startParams);
   assert.equal(started.thread.modelProvider, "smoke");
   for (const [index, effort] of ["low", "max", "max"].entries()) {
     const turn = await client.sendRequest("turn/start", {

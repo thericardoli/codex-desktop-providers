@@ -163,6 +163,7 @@ export function decorateModels(
     data: response.data.map((value) => {
       const metadata = object(value);
       const entry = models.get(String(metadata?.model));
+      if (entry && metadata?.[MARKER] === entry.provider) return value;
       return entry
         ? {
             ...metadata,

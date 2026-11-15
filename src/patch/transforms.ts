@@ -11,7 +11,7 @@ import {
 import { full, fullAncestor } from "acorn-walk";
 import MagicString from "magic-string";
 
-const BINDING = "__codexDesktopProviders";
+export const BINDING = "__codexDesktopProviders";
 const DEFAULT_IMPORT = "./codex-desktop-providers/index.js";
 
 export const PATCH_POINTS = [
@@ -21,7 +21,13 @@ export const PATCH_POINTS = [
   "visibility",
   "efforts",
 ] as const;
-export type PatchPoint = (typeof PATCH_POINTS)[number];
+export const HOST_PATCH_POINTS = [
+  "host-request",
+  "host-prewarm",
+  "host-defaults",
+] as const;
+export type PatchPoint =
+  (typeof PATCH_POINTS)[number] | (typeof HOST_PATCH_POINTS)[number];
 
 interface SourceEdit {
   start: number;
@@ -281,6 +287,7 @@ export function applyEdits(
   source: string,
   edits: readonly PatchEdit[],
   runtimeImport = DEFAULT_IMPORT,
+  commonjs = false,
 ): string {
   if (source.includes(BINDING))
     throw new Error("Asset already contains the patch binding");
@@ -298,7 +305,9 @@ export function applyEdits(
     else output.overwrite(edit.start, edit.end, edit.replacement);
   }
   output.prepend(
-    `import * as ${BINDING} from ${JSON.stringify(runtimeImport)};\n`,
+    commonjs
+      ? `const ${BINDING}=()=>import(${JSON.stringify(runtimeImport)});\n`
+      : `import * as ${BINDING} from ${JSON.stringify(runtimeImport)};\n`,
   );
   const result = output.toString();
   ast(result);

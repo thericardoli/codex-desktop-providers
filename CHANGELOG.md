@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.5
+
+- Cover the main-process hosted request client and default-model writer as well
+  as renderer clients. Hosted chats in 0.6.4 could still route external IDs to
+  OpenAI and persist them as the global model default.
+- Discover hosted request, prewarm and default boundaries structurally; require
+  a complete, unique group when exposed. Load the existing ES-module runtime
+  from CommonJS without changing native transport or authentication.
+- Keep catalog decoration idempotent when host and renderer both intercept a
+  response. Validate actual hosted method bodies with the native localhost
+  Responses smoke, and check ES-module loading directly from ASAR with Electron.
+
 ## 0.6.4
 
 - Route native extension thread-start requests through the existing provider
