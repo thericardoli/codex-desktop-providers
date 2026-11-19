@@ -275,6 +275,7 @@ test("launcher prepares before starting, forwards arguments, and preserves exit 
     const args = [
       cli,
       "launch",
+      "--cache-only",
       "--native-cache",
       p.native,
       "--external",

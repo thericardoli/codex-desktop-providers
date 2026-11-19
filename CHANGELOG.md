@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Add `sync` and synchronize on `launch` by default, supplementing cached native
+  IDs with unchanged metadata from `codex debug models --bundled`. A static
+  catalog no longer hides models already bundled in an updated native binary.
+- Select the binary with `--codex`; bound child execution and fall back to a
+  valid cache with a warning. Bootstrap missing/corrupt caches from bundled
+  metadata while preserving atomic output and external overrides.
+- Retain offline `catalog` behavior and add `launch --cache-only`. Account
+  refresh, entitlement checks and live backend reload remain native concerns.
+
 ## 0.6.5
 
 - Cover the main-process hosted request client and default-model writer as well

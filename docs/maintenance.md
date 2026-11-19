@@ -130,11 +130,18 @@ build. Building must not switch the live system.
 
 For catalog configuration, maintain `external-models.json` and point native
 `model_catalog_json` at the generated output. The `launch` command regenerates
-that output from the native cache before starting the packaged app. Do not edit
+that output from the native cache, supplemented with missing IDs from
+`codex debug models --bundled`, before starting the packaged app. Select an
+updated native executable with `--codex`; `sync` performs the same composition
+without launching, while `catalog` and `launch --cache-only` use only the cache.
+Export failure warns and falls back to a valid cache. If neither source is valid,
+or composition fails, the previous generated file is retained. Do not edit
 the generated file or store native prompts/cache snapshots in this repository.
 Use an explicit absolute packaged application path to avoid launcher recursion.
-Refreshing the native cache remains a native Codex operation; the plugin never
-invokes credential helpers or maintains authentication of its own.
+Refreshing the account cache remains a native Codex operation; bundled export
+does not perform a network request, remove cached IDs or grant model access.
+The plugin never invokes credential helpers or maintains authentication of its
+own. After synchronization, restart the native backend to load the new snapshot.
 
 When changing a user-level launcher, back up its previous file/symlink and native
 config, validate the generated catalog on an isolated backend, and publish the

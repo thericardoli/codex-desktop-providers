@@ -470,3 +470,42 @@ The generated catalog remains a startup snapshot. Launch-time regeneration uses
 the newest locally available native cache; it does not fetch account catalogs or
 refresh the running app-server. Missing cache/template data fails clearly rather
 than silently switching templates or reusing stale generated data.
+
+## Local catalog synchronization (2026-11-19)
+
+`sync` and the default `launch` path now supplement the native cache with an
+export from `codex debug models --bundled`. The selected binary's bundled
+metadata bypasses `model_catalog_json` without authentication. Cached entries
+win exact-ID collisions, so account-supplied windows, prompts and capability
+metadata are retained. The export fills missing IDs; it does not refresh the
+account cache or remove cached models. `catalog` and `launch --cache-only`
+continue to perform offline cache-only composition.
+
+Synthetic tests exercise real child processes and cover newly bundled models,
+cache-priority metadata, unchanged external overrides, repeated synchronization,
+missing/malformed caches, missing executables, nonzero exits, invalid JSON,
+empty/duplicate exports, timeouts, credential/source aliases, concurrent source
+changes, conflicting CLI options, launch ordering, argument forwarding and
+atomic failure preservation. Child stderr is not included in warnings.
+
+A disposable integration check used the actual bundled catalogs from Desktop
+**26.1111.21308** / backend **0.169.0-alpha.11.1** and CLI **0.170.0**. The former
+served as the stale input cache and contained neither GPT-6.2 model. Running the
+compiled `sync` command with the latter added exactly `gpt-6.2-sol` and
+`gpt-6.2-astra`, preserved the stale input file, and composed the example
+external model. The desktop backend then loaded the generated catalog and
+returned both new models and the external model through native `model/list`.
+This used an isolated temporary home, no credentials, no external inference,
+and no changes to the installed app, native user config or account cache.
+
+The [native CLI implementation](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/cli/src/main.rs#L2235)
+explicitly uses `bundled_models_response` for `--bundled`. Plain `debug models`
+instead loads configured model metadata; a local probe returned the existing
+combined static catalog, including external IDs. It is therefore unsuitable as
+an automatic account refresh while `model_catalog_json` is configured.
+
+Type checking, all 96 synthetic tests, compilation, formatting and version
+consistency passed. Remote-only model releases still require normal native
+cache refresh or a newer selected binary. A running backend must still be
+restarted after synchronization; this change does not implement live reload or
+grant model entitlement.

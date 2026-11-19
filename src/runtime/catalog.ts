@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import { object, type JsonObject } from "./types.js";
 
 const PREFIX = "[desktop-providers]";
-const MAX_CATALOG_BYTES = 64 * 1024 * 1024;
+export const MAX_CATALOG_BYTES = 64 * 1024 * 1024;
 const FORBIDDEN_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 const EFFORTS = new Set([
   "none",
@@ -23,7 +23,7 @@ function fail(message: string): never {
   throw new Error(`${PREFIX} ${message}`);
 }
 
-function modelEntries(value: unknown, label: string): JsonObject[] {
+export function modelEntries(value: unknown, label: string): JsonObject[] {
   const entries = object(value)?.models;
   if (!Array.isArray(entries)) fail(`${label} must contain a models array`);
   const ids = new Set<string>();
@@ -164,7 +164,7 @@ export function composeCatalog(
   return { models: [...structuredClone(nativeModels), ...additions] };
 }
 
-interface Snapshot {
+export interface Snapshot {
   path: string;
   text: string;
   dev: number;
@@ -173,7 +173,7 @@ interface Snapshot {
   mtimeMs: number;
 }
 
-async function readSnapshot(path: string): Promise<Snapshot> {
+export async function readSnapshot(path: string): Promise<Snapshot> {
   const canonical = await realpath(path);
   if (basename(canonical) === "auth.json")
     fail("Credential files are not model catalogs");
@@ -196,7 +196,7 @@ async function readSnapshot(path: string): Promise<Snapshot> {
   }
 }
 
-function parseSnapshot(snapshot: Snapshot, label: string): unknown {
+export function parseSnapshot(snapshot: Snapshot, label: string): unknown {
   try {
     return JSON.parse(snapshot.text);
   } catch {
@@ -215,29 +215,39 @@ async function unchanged(snapshot: Snapshot): Promise<void> {
     fail("Catalog source changed during generation; retry before launching");
 }
 
-/** Host-side startup preparation. Not imported into the renderer, and performs
- * no HTTP requests, config writes, credential reads, or helper execution. */
-export async function prepareCatalog(
-  nativePath: string,
-  externalPath: string,
-  outputPath: string,
-): Promise<{
+export interface PreparedCatalog {
   nativeModels: number;
   externalModels: number;
   template: string;
   output: string;
-}> {
-  const [native, external] = await Promise.all([
-    readSnapshot(nativePath),
-    readSnapshot(externalPath),
-  ]);
+}
+
+/** Publish only validated metadata, retaining source identity checks even when
+ * the native cache is optional or supplemented by a bundled native export. */
+export async function publishCatalog(
+  native: unknown,
+  external: Snapshot,
+  outputPath: string,
+  nativePath: string,
+  sources: Snapshot[],
+): Promise<PreparedCatalog> {
   await mkdir(dirname(resolve(outputPath)), { recursive: true, mode: 0o700 });
   const output = resolve(
     await realpath(dirname(resolve(outputPath))),
     basename(outputPath),
   );
+  const nativeDirectory = await realpath(dirname(resolve(nativePath))).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+      return dirname(resolve(nativePath));
+    },
+  );
   if (
-    [native.path, external.path].includes(output) ||
+    [
+      resolve(nativeDirectory, basename(nativePath)),
+      external.path,
+      ...sources.map((source) => source.path),
+    ].includes(output) ||
     basename(output) === "auth.json"
   )
     fail(
@@ -253,23 +263,20 @@ export async function prepareCatalog(
     fail("Generated catalog target must be a regular file, not a link");
   if (
     existing &&
-    [native, external].some(
+    [...sources, external].some(
       (source) => source.dev === existing.dev && source.ino === existing.ino,
     )
   )
     fail("Generated catalog must not alias a source file");
   const parsedExternal = parseSnapshot(external, "External catalog");
-  const catalog = composeCatalog(
-    parseSnapshot(native, "Native catalog"),
-    parsedExternal,
-  );
+  const catalog = composeCatalog(native, parsedExternal);
   const temporary = `${output}.${randomUUID()}.tmp`;
   const file = await open(temporary, "wx", 0o600);
   try {
     await file.writeFile(JSON.stringify(catalog, null, 2) + "\n");
     await file.sync();
     await file.close();
-    await unchanged(native);
+    for (const source of sources) await unchanged(source);
     await unchanged(external);
     await rename(temporary, output);
     // Node cannot fsync directory handles on Windows. The temporary file is
@@ -295,6 +302,25 @@ export async function prepareCatalog(
     template: String(object(parsedExternal)!.template),
     output,
   };
+}
+
+/** Offline composition. No child process, HTTP request or authentication. */
+export async function prepareCatalog(
+  nativePath: string,
+  externalPath: string,
+  outputPath: string,
+): Promise<PreparedCatalog> {
+  const [native, external] = await Promise.all([
+    readSnapshot(nativePath),
+    readSnapshot(externalPath),
+  ]);
+  return publishCatalog(
+    parseSnapshot(native, "Native catalog"),
+    external,
+    outputPath,
+    nativePath,
+    [native],
+  );
 }
 
 export async function launchApplication(

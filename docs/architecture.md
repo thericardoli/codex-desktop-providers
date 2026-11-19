@@ -3,13 +3,23 @@
 The CLI is Node.js/TypeScript. Its build-time check/patch commands modify disposable
 archives; host-side catalog/launch commands prepare metadata before application
 startup. The injected shared modules are plain ES modules with no Node.js
-imports or HTTP client. The host-only `src/runtime/catalog.ts` module is not
-injected into ASAR. There is no daemon or inference proxy.
+imports or HTTP client. The host-only `src/runtime/catalog.ts` and
+`src/runtime/sync.ts` modules are not injected into ASAR. There is no daemon or
+inference proxy.
 
 ## Startup catalog generation
 
-The launcher reads an existing native `models_cache.json` and a user-authored
-external-only specification. Official entries pass through unchanged. Every
+The launcher reads native `models_cache.json` when available and invokes the
+selected native binary with `debug models --bundled` to fill missing IDs.
+Cached entries win collisions, retaining account metadata. Bundled entries are
+copied unchanged; a new binary can supply new IDs even when the cache is frozen
+by `model_catalog_json`. The child has a 10-second deadline and a 64 MiB output
+limit, runs without a shell, and does not authenticate. Export failures warn and
+fall back to a valid cache; a valid bundled export can bootstrap a missing or
+malformed cache. Both sources failing leaves the previous output intact.
+
+The user-authored external-only specification is applied after synchronization.
+Official entries pass through unchanged. Every
 external entry deep-merges its explicit overrides over one exact native template
 (default example: `gpt-6-sol`). Nested objects merge, arrays replace, and explicit
 null/false/empty values survive. Cache account/identity metadata is not written.
@@ -19,11 +29,17 @@ writing. It fsyncs a private sibling temporary file, checks that source file
 identities have not changed, and atomically renames the result. Source aliases,
 credential-file inputs and symlink outputs are rejected. Generation failures
 prevent launch. No process or helper is invoked to obtain credentials or refresh
-remote metadata; existing native cache contents are the source.
+remote metadata. Neither the native cache nor user config is written. The
+`catalog` command and `launch --cache-only` skip native execution entirely.
 
 The application still consumes a static startup catalog. Regeneration happens on
 launch, not during a running conversation. Only the external specification is
 maintained by the user; the combined catalog is disposable generated data.
+This is an additive local-source synchronization, not a live account-catalog
+fetch or cached-model removal policy. Normal official entitlement checks remain
+in the original picker. Remote-only changes still need native cache refresh or
+a newer binary. Plain `debug models` is unsuitable because a configured static
+catalog can make it return our own combined output.
 
 ## Data flow
 

@@ -17,9 +17,10 @@ repository contains the patch and synthetic tests only.
 
 ## Configure only external models
 
-Maintain a small **external-models.json** file. The plugin's `launch` command
-reads the local native model cache, inherits external defaults from `gpt-6-sol`,
-and atomically generates a complete `model_catalog_json` before starting Desktop.
+Maintain a small **external-models.json** file. Before starting Desktop, `launch`
+reads the local native model cache and supplements missing models from the
+selected Codex binary's bundled catalog. It inherits external defaults from
+`gpt-6-sol` and atomically generates a complete `model_catalog_json`.
 Official entries are copied unchanged; you do not list or maintain them yourself.
 
 Start with [examples/external-models.json](examples/external-models.json):
@@ -86,13 +87,14 @@ needs one profile whose `model` exactly matches its catalog `slug`. Native provi
 credentials remain in their existing configuration and are never copied into
 catalog files.
 
-Prepare the catalog without launching:
+Synchronize the catalog without launching:
 
 ```sh
-codex-desktop-providers catalog \
+codex-desktop-providers sync \
   --native-cache /absolute/path/to/.codex/models_cache.json \
   --external /absolute/path/to/external-models.json \
-  --output /absolute/path/to/desktop-providers.generated.json
+  --output /absolute/path/to/desktop-providers.generated.json \
+  --codex /absolute/path/to/native/codex
 ```
 
 Use the launcher for automatic regeneration on each application start:
@@ -102,22 +104,44 @@ codex-desktop-providers launch \
   --native-cache /absolute/path/to/.codex/models_cache.json \
   --external /absolute/path/to/external-models.json \
   --output /absolute/path/to/desktop-providers.generated.json \
+  --codex /absolute/path/to/native/codex \
   --app /absolute/path/to/packaged/chatgpt -- "$@"
 ```
 
 Configure the desktop shortcut or shell wrapper to invoke this command. `--app`
 must point to the actual packaged launcher, not back to the wrapper itself. App
-arguments after `--` are forwarded unchanged. A missing template, invalid source,
-duplicate ID or write failure stops launch and leaves the previous valid catalog
-intact. The generator never substitutes another model for a missing `gpt-6-sol`.
+arguments after `--` are forwarded unchanged. `--codex` defaults to `codex` on
+PATH; use an explicit native executable path to choose which installed binary
+provides bundled metadata (on Windows, the actual `.exe`, not an npm `.cmd` shim).
+A missing template, invalid combined metadata, duplicate ID or write failure
+stops launch and leaves the previous valid catalog intact. The generator never
+substitutes another model for a missing `gpt-6-sol`.
 
 ### Refresh and native behavior
 
 The input cache is the native Codex cache, **not the previously generated file**.
-Each launch picks up the latest entries and template already present in that
-cache. The plugin does not fetch remote model metadata, read credential files,
-invoke credential helpers, or modify `models_cache.json`. A missing/outdated
-native cache must be refreshed through the normal native Codex workflow.
+`sync` and `launch` also run `codex debug models --bundled` without a shell, with
+a 10-second timeout and bounded output. This native command bypasses
+`model_catalog_json` and needs no authentication. New bundled IDs therefore
+appear even when a static startup catalog has stopped refreshing the cache.
+Cache entries win exact-ID collisions, preserving account-supplied metadata;
+missing IDs are copied unchanged from the selected binary. External overrides
+are composed only after synchronizing these native sources.
+
+If the binary is unavailable, incompatible, times out or returns invalid data,
+the commands warn and fall back to a valid native cache. A missing or malformed
+cache can be bootstrapped from a valid bundled export. If neither source is
+usable, generation fails without replacing the previous output. `sync` reports
+the source, added-model count and warnings as JSON. `catalog` remains a strictly
+offline cache-only command; `launch --cache-only` selects the same behavior and
+does not invoke Codex. It cannot be combined with `--codex`.
+
+This supplements local metadata; it does **not** fetch a live account catalog,
+remove cached models, refresh `models_cache.json`, read credentials or invoke
+credential helpers. Account-specific changes and models absent from both local
+sources still require the normal native Codex refresh workflow or a newer Codex
+binary. Plain `codex debug models` is deliberately not used: with a startup
+override it can return the generated static catalog, including external models.
 
 The backend still loads the generated catalog as a static snapshot at startup.
 Running chats do not hot-reload changes; completely restart the app-server after
@@ -125,10 +149,11 @@ editing external settings or refreshing native metadata. A persistent daemon may
 survive closing the Desktop window. Launch-time merging does not provide native
 per-thread catalog switching or continuous server-side catalog refresh.
 
-Official entries preserve the native cache's default windows and metadata, plus
-normal account availability checks. They are not pinned in the user-maintained
-external file. Global `model_context_window` and compaction overrides still apply
-if present; remove them when each catalog model should supply its own defaults.
+Official entries preserve their source's default windows and metadata, plus
+normal account availability checks. A bundled entry does not grant account
+access. They are not pinned in the user-maintained external file. Global
+`model_context_window` and compaction overrides still apply if present; remove
+them when each catalog model should supply its own defaults.
 
 With the example overrides and a 95% usable fraction, the backend reports 996147
 usable tokens and a 900000 automatic-compaction threshold. Names, supported
